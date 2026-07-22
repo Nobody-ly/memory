@@ -44,4 +44,3 @@ class LLMRetryTests(unittest.TestCase):
         self.assertEqual(client._call_with_retry(operation, "test"), "accepted")
         self.assertEqual(calls["count"], 3)
         self.assertEqual(client.last_request_attempts, 3)
-

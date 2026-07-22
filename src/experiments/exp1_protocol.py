@@ -175,4 +175,3 @@ def stable_hash(payload: Any) -> str:
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-

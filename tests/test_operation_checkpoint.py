@@ -54,4 +54,3 @@ class OperationCheckpointTests(unittest.TestCase):
             OperationCheckpoint(path, "old").save()
             with self.assertRaises(CheckpointSignatureError):
                 OperationCheckpoint(path, "new")
-

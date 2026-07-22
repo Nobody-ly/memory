@@ -32,4 +32,3 @@ class Exp1SchemaAndScoringTests(unittest.TestCase):
         self.assertEqual(scores["emotion_accuracy"], 0.0)
         self.assertEqual(scores["sentiment_accuracy"], 1.0)
         self.assertEqual(scores["topic_consistency"], 1.0)
-

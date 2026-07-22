@@ -49,4 +49,3 @@ def normalize_state(value: Any) -> Dict[str, str]:
     if not topic:
         raise ValueError("topic must not be empty")
     return {"emotion": emotion, "sentiment": sentiment, "topic": topic}
-

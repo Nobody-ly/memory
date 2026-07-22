@@ -23,4 +23,3 @@ class RealTalkEvaluatorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "emotion label"):
             RealTalkLabelEvaluator(factory).annotate("plain")
-

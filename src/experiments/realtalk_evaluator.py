@@ -78,4 +78,3 @@ def _top_label(prediction: Any) -> str:
     if not isinstance(first, dict) or "label" not in first:
         raise ValueError("Hugging Face prediction has no label")
     return str(first["label"]).strip().lower()
-
