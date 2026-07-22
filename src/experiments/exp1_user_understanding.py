@@ -85,7 +85,9 @@ def run_exp1(
     checkpoint_path = output_dir / "checkpoint.json"
     if config.fresh and checkpoint_path.exists():
         checkpoint_path.unlink()
-    signature = _run_signature(config, llm, chat_files)
+    signature = _run_signature(
+        config, llm, chat_files, label_evaluator.metadata()
+    )
     checkpoint = OperationCheckpoint(checkpoint_path, signature)
     started = perf_counter()
     run_failures: List[Dict[str, Any]] = []
@@ -589,7 +591,10 @@ def _prompt_hashes() -> Dict[str, str]:
 
 
 def _run_signature(
-    config: Exp1Config, llm: LLMClient, chat_files: List[Path]
+    config: Exp1Config,
+    llm: LLMClient,
+    chat_files: List[Path],
+    reference_metadata: Dict[str, Any],
 ) -> str:
     signature_config = asdict(config)
     for key in ("output_dir", "continue_on_error", "fresh"):
@@ -605,6 +610,7 @@ def _run_signature(
         "schema_version": 1,
         "model": getattr(llm, "model", None),
         "enable_thinking": getattr(llm, "enable_thinking", None),
+        "reference_evaluator": reference_metadata,
         "config": signature_config,
         "source_hashes": {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()

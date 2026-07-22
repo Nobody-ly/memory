@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from src.experiments.exp1_user_understanding import Exp1Config, METHODS, run_exp1
+from src.experiments.operation_checkpoint import CheckpointSignatureError
 
 
 class FakeLLM:
@@ -53,6 +54,11 @@ class FakeLabels:
         return {"provider": "fake-pinned-labels"}
 
 
+class AlternateFakeLabels(FakeLabels):
+    def metadata(self):
+        return {"provider": "different-label-revision"}
+
+
 class Exp1MockRunTests(unittest.TestCase):
     def test_complete_triplets_and_resume_without_duplicate_calls(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -94,3 +100,7 @@ class Exp1MockRunTests(unittest.TestCase):
             self.assertTrue((output / "summary.json").exists())
             self.assertTrue((output / "run_manifest.json").exists())
 
+            with self.assertRaisesRegex(
+                CheckpointSignatureError, "checkpoint does not match"
+            ):
+                run_exp1(config, llm=llm, label_evaluator=AlternateFakeLabels())
