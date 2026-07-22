@@ -1,50 +1,59 @@
-"""
-Experiment 1: RQ1 — Does explicit user modeling improve user understanding?
-
-Objective: Validate whether explicit user modeling (5-layer profile) can more
-accurately understand users than traditional Self-model / Other-model, and form
-stable and consistent user representations.
-
-Experimental Settings:
-  1. Self-model based Other Modeling (Mahault et al.) — baseline
-  2. Flat User Profile — baseline
-  3. Explicit User Modeling (Ours) — 5-layer hierarchical profile
-
-Evaluation Metrics (all from REALTALK):
-  - Emotion Accuracy
-  - Sentiment Accuracy
-  - Topic Consistency
-  - Persona Consistency
-
-Visualization:
-  - Portrait Evolution: How the 5-layer profile evolves over sessions
-"""
+"""Experiment 1: causal understanding of the current observed user state."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-from dataclasses import dataclass, field
-from datetime import datetime
+import os
+import re
+from collections import defaultdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from time import perf_counter
+from typing import Any, Dict, Iterable, List, Optional
 
+from ..epistemic_decay import compute_portrait_entropy
 from ..llm_client import LLMClient
-from ..utils import load_json, save_json
-from ..epistemic_decay import PROFILE_LAYERS, compute_portrait_entropy
-from .experiment_utils import (
-    load_chat_files,
-    detect_speakers,
-    extract_explicit_profile,
-    extract_flat_profile,
-    infer_self_model,
-    extract_emotion_sentiment,
-    extract_topic,
-    evaluate_profile_consistency,
-    build_eval_points_at_sessions,
-    save_experiment_results,
-    robust_parse_json,
+from ..prompts.templates_en import (
+    FLAT_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+    FLAT_PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
+    PROFILE_EXTRACTION_SYSTEM_PROMPT,
+    PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
 )
-from .persona_simulation import flatten_messages, session_keys, condense_profile
+from ..utils import load_json
+from .exp1_protocol import (
+    build_session_boundary_points,
+    resolve_chat_roles,
+    stable_hash,
+)
+from .exp1_schema import STATE_RESPONSE_SCHEMA, normalize_state
+from .experiment_utils import load_chat_files, robust_parse_json
+from .operation_checkpoint import OperationCheckpoint
+from .realtalk_evaluator import RealTalkLabelEvaluator
+from .result_provenance import build_run_manifest
+
+
+METHODS = ("self_model", "flat_profile", "explicit_model")
+PROFILE_LAYERS = ("core", "regulation", "cognition", "identity", "behavior")
+
+STATE_SYSTEM_PROMPTS = {
+    "self_model": (
+        "You are a companion agent using self-model based other modeling. "
+        "Infer the current state expressed by the observed user by projecting "
+        "your own persona and perspective onto their situation."
+    ),
+    "flat_profile": (
+        "You are a user-understanding evaluator. Infer the current state "
+        "expressed by the observed user using the conversation and the flat "
+        "user profile."
+    ),
+    "explicit_model": (
+        "You are a user-understanding evaluator. Infer the current state "
+        "expressed by the observed user using the conversation and the "
+        "five-layer user profile."
+    ),
+}
 
 
 @dataclass
@@ -52,293 +61,630 @@ class Exp1Config:
     dataset_dir: str = "dataset"
     output_dir: str = "data/exp1_user_understanding"
     min_context_sessions: int = 2
+    context_sessions: Optional[int] = 3
+    max_context_chars: int = 60000
     max_eval_points_per_chat: int = 15
+    operation_max_attempts: int = 3
     chat_filter: Optional[List[str]] = None
+    continue_on_error: bool = True
+    fresh: bool = False
 
 
-def run_exp1(config: Exp1Config) -> Dict[str, Any]:
-    """Run Experiment 1: Explicit User Modeling vs baselines."""
+def run_exp1(
+    config: Exp1Config,
+    llm: Optional[LLMClient] = None,
+    label_evaluator: Optional[RealTalkLabelEvaluator] = None,
+) -> Dict[str, Any]:
     chat_files = load_chat_files(config.dataset_dir, config.chat_filter)
-    print(f"[Exp1] Processing {len(chat_files)} chat files")
+    if not chat_files:
+        raise ValueError("no Chat_*.json files matched the experiment configuration")
+    llm = llm or LLMClient()
+    label_evaluator = label_evaluator or RealTalkLabelEvaluator()
 
-    llm = LLMClient()
-    all_results: List[Dict[str, Any]] = []
+    output_dir = Path(config.output_dir)
+    checkpoint_path = output_dir / "checkpoint.json"
+    if config.fresh and checkpoint_path.exists():
+        checkpoint_path.unlink()
+    signature = _run_signature(config, llm, chat_files)
+    checkpoint = OperationCheckpoint(checkpoint_path, signature)
+    started = perf_counter()
+    run_failures: List[Dict[str, Any]] = []
+    print(
+        f"[Exp1] chats={len(chat_files)} model={getattr(llm, 'model', None)} "
+        f"context_sessions={config.context_sessions or 'all'} "
+        f"resume_results={len(checkpoint.result_values())}"
+    )
 
     for chat_file in chat_files:
-        print(f"\n[Exp1] Processing {chat_file.name}")
         chat = load_json(str(chat_file))
-        user_speaker, agent_speaker = detect_speakers(chat)
-        print(f"  Speakers: user={user_speaker}, agent={agent_speaker}")
-
-        # Load persona
-        persona_path = Path(config.dataset_dir) / "output" / "agent" / f"{agent_speaker.lower().replace(' ', '_')}_persona.json"
-        persona = load_json(str(persona_path)) if persona_path.exists() else {}
-
-        # Extract profiles using 3 methods
-        print("  [1/3] Extracting explicit (5-layer) profile...")
-        explicit_profile = extract_explicit_profile(llm, chat, user_speaker)
-
-        print("  [2/3] Extracting flat profile...")
-        flat_profile = extract_flat_profile(llm, chat, user_speaker)
-
-        print("  [3/3] Setting up self-model baseline...")
-        # Self-model is per-message, not a stored profile
-
-        # Build evaluation points at session boundaries
-        eval_points = build_eval_points_at_sessions(
-            chat, agent_speaker, user_speaker, config.min_context_sessions
+        user_speaker, agent_speaker, role_warnings = resolve_chat_roles(chat)
+        for warning in role_warnings:
+            print(f"[Exp1 role warning] {chat_file.name}: {warning}")
+        persona = _load_agent_persona(config.dataset_dir, agent_speaker)
+        points = build_session_boundary_points(
+            chat,
+            user_speaker,
+            min_context_sessions=config.min_context_sessions,
+            context_sessions=config.context_sessions,
+            max_context_chars=config.max_context_chars,
+            max_eval_points=config.max_eval_points_per_chat,
         )
-        if len(eval_points) > config.max_eval_points_per_chat:
-            eval_points = eval_points[:config.max_eval_points_per_chat]
-        print(f"  Evaluation points: {len(eval_points)}")
+        print(
+            f"[Exp1] {chat_file.name}: user={user_speaker} "
+            f"agent={agent_speaker} points={len(points)}"
+        )
 
-        for ep in eval_points:
-            print(f"  Evaluating {ep['eval_id']}...")
-            target_msg = ep["target_message"]
-            context_turns = ep["context_turns"]
-            history_text = "\n".join(
-                f"{t['speaker']}: {t['content']}" for t in context_turns[-15:]
-            )
+        for index, point in enumerate(points, start=1):
+            result_id = f"{chat_file.stem}:{point['sample_id']}"
+            if result_id in checkpoint.data["results"]:
+                print(f"  [{index}/{len(points)}] resume {point['eval_id']}")
+                continue
+            sample_started = perf_counter()
+            print(f"  [{index}/{len(points)}] evaluate {point['eval_id']}")
+            try:
+                flat_profile, flat_key = _cached_profile(
+                    checkpoint, llm, config, chat_file.stem, point, user_speaker, "flat"
+                )
+                explicit_profile, explicit_key = _cached_profile(
+                    checkpoint, llm, config, chat_file.stem, point, user_speaker, "explicit"
+                )
+                reference = _cached_reference(
+                    checkpoint, llm, label_evaluator, config, result_id,
+                    point["target_message"],
+                )
 
-            # Ground truth annotation
-            gt_emotion = extract_emotion_sentiment(llm, target_msg)
-            gt_topic = extract_topic(llm, target_msg)
+                method_inputs = {
+                    "self_model": json.dumps(persona, ensure_ascii=False, indent=2),
+                    "flat_profile": json.dumps(flat_profile, ensure_ascii=False, indent=2),
+                    "explicit_model": json.dumps(
+                        explicit_profile, ensure_ascii=False, indent=2
+                    ),
+                }
+                method_results: Dict[str, Any] = {}
+                for method in METHODS:
+                    prediction = _cached_prediction(
+                        checkpoint,
+                        llm,
+                        config,
+                        result_id,
+                        method,
+                        point["context_text"],
+                        point["target_message"],
+                        method_inputs[method],
+                    )
+                    method_results[method] = {
+                        "prediction": prediction,
+                        "scores": score_prediction(prediction, reference),
+                    }
 
-            # --- Method 1: Self-model Other Modeling ---
-            self_model_inference = infer_self_model(
-                llm, target_msg, history_text, persona
-            )
-            self_model_scores = _score_understanding(
-                llm, self_model_inference, gt_emotion, gt_topic
-            )
+                result = {
+                    "result_id": result_id,
+                    "chat_file": chat_file.name,
+                    "eval_id": point["eval_id"],
+                    "boundary_index": point["boundary_index"],
+                    "target_session": point["target_session"],
+                    "user_speaker": user_speaker,
+                    "agent_speaker": agent_speaker,
+                    "role_warnings": role_warnings,
+                    "target_message": point["target_message"],
+                    "target_dia_ids": point["target"].get("dia_ids", []),
+                    "reference": reference,
+                    "methods": method_results,
+                    "profile": {
+                        "history_hash": point["profile_history_hash"],
+                        "completed_sessions": point["completed_sessions"],
+                        "flat_cache_key": flat_key,
+                        "explicit_cache_key": explicit_key,
+                        "flat_characters": len(method_inputs["flat_profile"]),
+                        "explicit_characters": len(method_inputs["explicit_model"]),
+                        "explicit_portrait_entropy": compute_portrait_entropy(
+                            explicit_profile
+                        ),
+                    },
+                    "context": {
+                        "configured_sessions": config.context_sessions,
+                        "actual_session_count": point["context_session_count"],
+                        "semantic_turns": len(point["context_turns"]),
+                        "characters": len(point["context_text"]),
+                        "truncated": point["context_truncated"],
+                    },
+                    "sample_elapsed_seconds": round(
+                        perf_counter() - sample_started, 3
+                    ),
+                    "completed_at_utc": _now(),
+                    "status": "complete",
+                }
+                checkpoint.store_result(result_id, result)
+            except Exception as exc:
+                failure = {
+                    "result_id": result_id,
+                    "chat_file": chat_file.name,
+                    "eval_id": point["eval_id"],
+                    "status": "excluded_incomplete_triplet",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:1000],
+                    "updated_at_utc": _now(),
+                }
+                checkpoint.store_excluded_result(result_id, failure)
+                run_failures.append(failure)
+                print(f"  [excluded] {type(exc).__name__}: {exc}")
+                if not config.continue_on_error:
+                    raise
 
-            # --- Method 2: Flat Profile ---
-            flat_scores = _score_with_profile(
-                llm, flat_profile, target_msg, history_text,
-                gt_emotion, gt_topic, profile_type="flat"
-            )
-
-            # --- Method 3: Explicit User Modeling (Ours) ---
-            explicit_scores = _score_with_profile(
-                llm, explicit_profile, target_msg, history_text,
-                gt_emotion, gt_topic, profile_type="explicit"
-            )
-
-            result = {
-                "chat_file": chat_file.name,
-                "eval_id": ep["eval_id"],
-                "boundary_idx": ep["boundary_idx"],
-                "target_session": ep["target_session"],
-                "target_message": target_msg,
-                "ground_truth_emotion": gt_emotion,
-                "ground_truth_topic": gt_topic,
-                "self_model": {
-                    "inference": self_model_inference,
-                    "scores": self_model_scores,
-                },
-                "flat_profile": {
-                    "scores": flat_scores,
-                },
-                "explicit_model": {
-                    "scores": explicit_scores,
-                },
-                "timestamp": datetime.now().isoformat(),
-            }
-            all_results.append(result)
-
-            print(f"    Self-model: emo={self_model_scores.get('emotion_accuracy', 'N/A')}, "
-                  f"sent={self_model_scores.get('sentiment_accuracy', 'N/A')}")
-            print(f"    Flat:       emo={flat_scores.get('emotion_accuracy', 'N/A')}, "
-                  f"sent={flat_scores.get('sentiment_accuracy', 'N/A')}")
-            print(f"    Explicit:   emo={explicit_scores.get('emotion_accuracy', 'N/A')}, "
-                  f"sent={explicit_scores.get('sentiment_accuracy', 'N/A')}")
-
-    # Compute summary
-    summary = _aggregate_exp1_results(all_results, explicit_profile, chat)
-
-    # Save results
-    save_experiment_results(
-        config.output_dir, "exp1_user_understanding",
-        all_results, summary, vars(config)
+    results = sorted(
+        checkpoint.result_values(), key=lambda item: item["result_id"]
     )
-    print(f"\n[Exp1] Summary: {json.dumps(summary.get('comparison', {}), indent=2)}")
+    summary = aggregate_results(results)
+    summary.update({
+        "elapsed_seconds": round(perf_counter() - started, 3),
+        "failed_samples_excluded_this_run": run_failures,
+        "failed_sample_count_all_runs": sum(
+            key.startswith("sample:") for key in checkpoint.data["failures"]
+        ),
+        "token_usage": _checkpoint_token_usage(checkpoint),
+        "primary_aggregation": "chat_macro",
+        "realtalk_alignment": {
+            "emotion_and_sentiment": "pinned REALTALK classifiers on human target messages",
+            "topic": "Exp1-specific extension, not a direct REALTALK benchmark metric",
+            "persona_consistency": (
+                "separate diagnostic using absolute cross-conversation differences "
+                "for Exp1-available EI attributes only"
+            ),
+        },
+    })
+    manifest = build_run_manifest(
+        {**asdict(config), "fresh": False}, getattr(llm, "model", None)
+    )
+    manifest.update({
+        "run_signature": signature,
+        "reference_evaluator": label_evaluator.metadata(),
+        "response_schema": STATE_RESPONSE_SCHEMA,
+        "network_retry_max_attempts": getattr(llm, "max_retries", None),
+        "operation_retry_max_attempts": config.operation_max_attempts,
+        "prompt_hashes": _prompt_hashes(),
+    })
+    _write_outputs(output_dir, results, summary, manifest)
+    print(f"[Exp1] summary={json.dumps(summary.get('comparison', {}), indent=2)}")
     return summary
 
 
-def _score_understanding(
+def _load_agent_persona(dataset_dir: str, agent_speaker: str) -> Dict[str, Any]:
+    filename = re.sub(r"\s+", "_", agent_speaker.strip().lower()) + "_persona.json"
+    path = Path(dataset_dir) / "output" / "agent" / filename
+    if not path.exists():
+        raise FileNotFoundError(f"agent persona is required but missing: {path}")
+    persona = load_json(str(path))
+    if not isinstance(persona, dict) or not persona:
+        raise ValueError(f"agent persona is empty or invalid: {path}")
+    return persona
+
+
+def _cached_profile(
+    checkpoint: OperationCheckpoint,
     llm: LLMClient,
-    inference: Dict[str, Any],
-    gt_emotion: Dict[str, Any],
-    gt_topic: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Score a self-model inference against ground truth."""
-    from ..metrics import compute_emotion_similarity
+    config: Exp1Config,
+    chat_stem: str,
+    point: Dict[str, Any],
+    user_speaker: str,
+    profile_type: str,
+) -> tuple[Dict[str, Any], str]:
+    prompt_hash = _prompt_hashes()[f"{profile_type}_profile"]
+    key = ":".join((
+        "profile",
+        chat_stem,
+        str(point["boundary_index"]),
+        profile_type,
+        point["profile_history_hash"],
+        str(getattr(llm, "model", "unknown")),
+        prompt_hash,
+    ))
 
-    pred_emotion = inference.get("inferred_emotion", "").lower().strip()
-    gt_em = gt_emotion.get("emotion", "").lower().strip()
-    emo_sim = compute_emotion_similarity(pred_emotion, gt_em)
-    emotion_accuracy = 1.0 if emo_sim >= 0.5 else emo_sim
-
-    pred_sentiment = inference.get("inferred_sentiment", "").lower().strip()
-    gt_sent = gt_emotion.get("sentiment", "").lower().strip()
-    sentiment_accuracy = 1.0 if pred_sentiment == gt_sent else 0.0
-
-    pred_topic = inference.get("inferred_topic", "").lower().strip()
-    gt_top = gt_topic.get("topic", "").lower().strip()
-    pred_words = set(pred_topic.split())
-    gt_words = set(gt_top.split())
-    topic_overlap = len(pred_words & gt_words) / max(len(gt_words), 1)
-
-    return {
-        "emotion_accuracy": emotion_accuracy,
-        "sentiment_accuracy": sentiment_accuracy,
-        "topic_overlap": round(topic_overlap, 3),
-    }
-
-
-def _score_with_profile(
-    llm: LLMClient,
-    profile: Dict[str, Any],
-    target_msg: str,
-    history_text: str,
-    gt_emotion: Dict[str, Any],
-    gt_topic: Dict[str, Any],
-    profile_type: str = "explicit",
-) -> Dict[str, Any]:
-    """Score understanding using a profile (explicit or flat).
-
-    Uses LLM to reason about user state given the profile + context.
-    """
-    profile_text = json.dumps(profile, ensure_ascii=False, indent=2)[:2000]
-
-    prompt = f"""STEP 1: Read the last 3-5 messages of the conversation. What is the emotional tone?
-STEP 2: Based on the conversation tone (NOT the profile), predict the user's next emotion.
-
-CONVERSATION CONTEXT:
-{history_text[:2000]}
-
-USER'S NEXT MESSAGE: "{target_msg}"
-
-USER BACKGROUND (for reference only):
-{profile_text}
-
-IMPORTANT: Friends chatting are rarely "neutral". Pick a specific emotion that matches the conversation flow.
-Use one of: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, amusement, guilt, curiosity
-
-Predict the user's emotion and sentiment. Output JSON:
-{{
-  "predicted_emotion": "emotion label",
-  "predicted_sentiment": "positive/negative/neutral",
-  "predicted_topic": "topic"
-}}"""
-
-    try:
-        result = robust_parse_json(llm.chat(
-            "You are a user understanding evaluator. Output only JSON.",
-            prompt,
-            temperature=0.2,
-            max_tokens=400,
+    def operation() -> Dict[str, Any]:
+        if profile_type == "flat":
+            system_prompt = FLAT_PROFILE_EXTRACTION_SYSTEM_PROMPT.format(
+                user_name=user_speaker
+            )
+            user_prompt = FLAT_PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE.format(
+                user_name=user_speaker, corpus=point["profile_text"]
+            )
+        else:
+            system_prompt = PROFILE_EXTRACTION_SYSTEM_PROMPT.format(
+                user_name=user_speaker
+            )
+            user_prompt = PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE.format(
+                user_name=user_speaker, corpus=point["profile_text"]
+            )
+        return robust_parse_json(llm.chat(
+            system_prompt, user_prompt, temperature=0.3, max_tokens=3000
         ))
-    except Exception:
-        result = {}
 
-    pred_emotion = result.get("predicted_emotion", "").lower().strip()
-    gt_em = gt_emotion.get("emotion", "").lower().strip()
-    from ..metrics import compute_emotion_similarity
-    emo_sim = compute_emotion_similarity(pred_emotion, gt_em)
-    emotion_accuracy = 1.0 if emo_sim >= 0.5 else emo_sim
+    validator = _validate_flat_profile if profile_type == "flat" else _validate_explicit_profile
+    value = checkpoint.execute(
+        key,
+        operation,
+        validator,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
+    return value, key
 
-    pred_sentiment = result.get("predicted_sentiment", "").lower().strip()
-    gt_sent = gt_emotion.get("sentiment", "").lower().strip()
-    sentiment_accuracy = 1.0 if pred_sentiment == gt_sent else 0.0
 
-    pred_topic = result.get("predicted_topic", "").lower().strip()
-    gt_top = gt_topic.get("topic", "").lower().strip()
-    pred_words = set(pred_topic.split())
-    gt_words = set(gt_top.split())
-    topic_overlap = len(pred_words & gt_words) / max(len(gt_words), 1)
-
+def _cached_reference(
+    checkpoint: OperationCheckpoint,
+    llm: LLMClient,
+    evaluator: RealTalkLabelEvaluator,
+    config: Exp1Config,
+    result_id: str,
+    target_message: str,
+) -> Dict[str, str]:
+    label_key = f"reference_labels:{result_id}:{stable_hash(target_message)}"
+    labels = checkpoint.execute(
+        label_key,
+        lambda: evaluator.annotate(target_message),
+        _validate_reference_labels,
+        max_attempts=config.operation_max_attempts,
+    )
+    topic_key = f"reference_topic:{result_id}:{stable_hash(target_message)}"
+    topic_state = checkpoint.execute(
+        topic_key,
+        lambda: _state_call(
+            llm,
+            "You identify the current state expressed in one observed user message.",
+            f"CURRENT USER MESSAGE:\n{target_message}\n\nIdentify its current state.",
+        ),
+        normalize_state,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
     return {
-        "emotion_accuracy": emotion_accuracy,
-        "sentiment_accuracy": sentiment_accuracy,
-        "topic_overlap": round(topic_overlap, 3),
-        "profile_usefulness": result.get("profile_usefulness", 0),
-        "full_prediction": result,
+        "emotion": labels["emotion"],
+        "sentiment": labels["sentiment"],
+        "topic": topic_state["topic"],
     }
 
 
-def _aggregate_exp1_results(
-    results: List[Dict[str, Any]],
-    explicit_profile: Dict[str, Any],
-    chat: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Aggregate results across all evaluation points."""
-    if not results:
-        return {"error": "No results"}
-
-    methods = ["self_model", "flat_profile", "explicit_model"]
-    method_scores: Dict[str, Dict[str, List[float]]] = {m: {"emotion": [], "sentiment": [], "topic": []} for m in methods}
-
-    for r in results:
-        for method in methods:
-            scores = r.get(method, {}).get("scores", {})
-            if "emotion_accuracy" in scores:
-                method_scores[method]["emotion"].append(scores["emotion_accuracy"])
-            if "sentiment_accuracy" in scores:
-                method_scores[method]["sentiment"].append(scores["sentiment_accuracy"])
-            if "topic_overlap" in scores:
-                method_scores[method]["topic"].append(scores["topic_overlap"])
-
-    comparison = {}
-    for method in methods:
-        scores = method_scores[method]
-        comparison[method] = {
-            "emotion_accuracy": round(sum(scores["emotion"]) / max(len(scores["emotion"]), 1), 4),
-            "sentiment_accuracy": round(sum(scores["sentiment"]) / max(len(scores["sentiment"]), 1), 4),
-            "topic_consistency": round(sum(scores["topic"]) / max(len(scores["topic"]), 1), 4),
-            "num_evaluations": len(scores["emotion"]),
-        }
-
-    # Portrait entropy of explicit profile
-    portrait_entropy = compute_portrait_entropy(
-        explicit_profile.get("state_axis", {}).get("static_profile", explicit_profile)
+def _cached_prediction(
+    checkpoint: OperationCheckpoint,
+    llm: LLMClient,
+    config: Exp1Config,
+    result_id: str,
+    method: str,
+    history_text: str,
+    target_message: str,
+    method_context: str,
+) -> Dict[str, str]:
+    input_hash = stable_hash({
+        "history": history_text,
+        "target": target_message,
+        "method_context": method_context,
+        "system": STATE_SYSTEM_PROMPTS[method],
+        "schema": STATE_RESPONSE_SCHEMA,
+    })
+    key = f"prediction:{result_id}:{method}:{input_hash}"
+    user_prompt = (
+        f"CONVERSATION HISTORY:\n{history_text or '(none)'}\n\n"
+        f"CURRENT USER MESSAGE:\n{target_message}\n\n"
+        f"{'AGENT PERSONA' if method == 'self_model' else 'USER PROFILE'}:\n"
+        f"{method_context}\n\n"
+        "Infer the current state expressed in the current user message."
+    )
+    return checkpoint.execute(
+        key,
+        lambda: _state_call(llm, STATE_SYSTEM_PROMPTS[method], user_prompt),
+        normalize_state,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
     )
 
+
+def _state_call(llm: LLMClient, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    raw = llm.chat(
+        system_prompt,
+        user_prompt,
+        temperature=0.2,
+        max_tokens=250,
+        response_schema=STATE_RESPONSE_SCHEMA,
+    )
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("strict schema response was not valid JSON") from exc
+
+
+def _validate_flat_profile(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict) or not value or value.get("error"):
+        raise ValueError("flat profile is empty or invalid")
+    return value
+
+
+def _validate_explicit_profile(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict) or value.get("error"):
+        raise ValueError("explicit profile is invalid")
+    missing = [layer for layer in PROFILE_LAYERS if not isinstance(value.get(layer), dict)]
+    if missing:
+        raise ValueError(f"explicit profile is missing layers: {missing}")
+    return value
+
+
+def _validate_reference_labels(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("reference labels must be an object")
+    normalized = normalize_state({
+        "emotion": value.get("emotion"),
+        "sentiment": value.get("sentiment"),
+        "topic": "reference-placeholder",
+    })
+    return {"emotion": normalized["emotion"], "sentiment": normalized["sentiment"]}
+
+
+def score_prediction(
+    prediction: Dict[str, str], reference: Dict[str, str]
+) -> Dict[str, float]:
+    return {
+        "emotion_accuracy": float(prediction["emotion"] == reference["emotion"]),
+        "sentiment_accuracy": float(
+            prediction["sentiment"] == reference["sentiment"]
+        ),
+        "topic_consistency": round(
+            _topic_overlap(prediction["topic"], reference["topic"]), 4
+        ),
+    }
+
+
+def _topic_overlap(prediction: str, reference: str) -> float:
+    predicted_words = set(re.findall(r"[\w']+", prediction.lower()))
+    reference_words = set(re.findall(r"[\w']+", reference.lower()))
+    return len(predicted_words & reference_words) / max(len(reference_words), 1)
+
+
+def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not results:
+        return {
+            "comparison": {},
+            "num_eval_points": 0,
+            "num_chats": 0,
+            "persona_consistency_diagnostic": {},
+        }
+    by_chat: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for result in results:
+        by_chat[result["chat_file"]].append(result)
+
+    comparison: Dict[str, Any] = {}
+    for method in METHODS:
+        per_chat: List[Dict[str, float]] = []
+        all_scores: List[Dict[str, float]] = []
+        for chat_results in by_chat.values():
+            scores = [item["methods"][method]["scores"] for item in chat_results]
+            all_scores.extend(scores)
+            per_chat.append({
+                metric: _mean(score[metric] for score in scores)
+                for metric in (
+                    "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
+                )
+            })
+        comparison[method] = {
+            "chat_macro": {
+                metric: round(_mean(chat[metric] for chat in per_chat), 4)
+                for metric in (
+                    "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
+                )
+            },
+            "micro": {
+                metric: round(_mean(score[metric] for score in all_scores), 4)
+                for metric in (
+                    "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
+                )
+            },
+            "num_evaluations": len(all_scores),
+        }
+
+    entropy_by_chat = {
+        chat: round(_mean(
+            item["profile"]["explicit_portrait_entropy"] for item in chat_results
+        ), 4)
+        for chat, chat_results in by_chat.items()
+    }
     return {
         "comparison": comparison,
-        "portrait_entropy": portrait_entropy,
+        "improvement_chat_macro": _improvements(comparison),
         "num_eval_points": len(results),
-        "improvement": {
-            "explicit_vs_self_model_emotion": round(
-                comparison["explicit_model"]["emotion_accuracy"] - comparison["self_model"]["emotion_accuracy"], 4
+        "num_chats": len(by_chat),
+        "portrait_entropy": {
+            "by_chat": entropy_by_chat,
+            "macro_average": round(_mean(entropy_by_chat.values()), 4),
+        },
+        "persona_consistency_diagnostic": _persona_consistency(results),
+    }
+
+
+def _improvements(comparison: Dict[str, Any]) -> Dict[str, float]:
+    values: Dict[str, float] = {}
+    for baseline in ("self_model", "flat_profile"):
+        for metric in ("emotion_accuracy", "sentiment_accuracy", "topic_consistency"):
+            values[f"explicit_vs_{baseline}_{metric}"] = round(
+                comparison["explicit_model"]["chat_macro"][metric]
+                - comparison[baseline]["chat_macro"][metric],
+                4,
+            )
+    return values
+
+
+def _persona_consistency(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Absolute cross-chat EI differences for speakers represented in Exp1."""
+    by_speaker_chat: Dict[str, Dict[str, List[Dict[str, str]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for result in results:
+        by_speaker_chat[result["user_speaker"]][result["chat_file"]].append(
+            result["reference"]
+        )
+    sentiment_value = {"negative": -1.0, "neutral": 0.0, "positive": 1.0}
+    participants: Dict[str, Any] = {}
+    for speaker, chats in by_speaker_chat.items():
+        if len(chats) != 2:
+            continue
+        chat_names = sorted(chats)
+        left, right = (chats[name] for name in chat_names)
+        left_distribution = _label_distribution(item["emotion"] for item in left)
+        right_distribution = _label_distribution(item["emotion"] for item in right)
+        labels = set(left_distribution) | set(right_distribution)
+        emotion_total_variation = 0.5 * sum(
+            abs(left_distribution.get(label, 0.0) - right_distribution.get(label, 0.0))
+            for label in labels
+        )
+        left_sentiment = _mean(sentiment_value[item["sentiment"]] for item in left)
+        right_sentiment = _mean(sentiment_value[item["sentiment"]] for item in right)
+        participants[speaker] = {
+            "chat_files": chat_names,
+            "emotion_distribution_absolute_difference": round(
+                emotion_total_variation, 4
             ),
-            "explicit_vs_flat_emotion": round(
-                comparison["explicit_model"]["emotion_accuracy"] - comparison["flat_profile"]["emotion_accuracy"], 4
+            "sentiment_mean_absolute_difference": round(
+                abs(left_sentiment - right_sentiment), 4
             ),
-            "explicit_vs_self_model_sentiment": round(
-                comparison["explicit_model"]["sentiment_accuracy"] - comparison["self_model"]["sentiment_accuracy"], 4
-            ),
+        }
+    return {
+        "scope": "human references for Exp1 target messages only",
+        "not_used_for_method_ranking": True,
+        "participants": participants,
+    }
+
+
+def _label_distribution(labels: Iterable[str]) -> Dict[str, float]:
+    counts: Dict[str, int] = defaultdict(int)
+    total = 0
+    for label in labels:
+        counts[label] += 1
+        total += 1
+    return {label: count / total for label, count in counts.items()} if total else {}
+
+
+def _mean(values: Iterable[float]) -> float:
+    collected = list(values)
+    return sum(collected) / len(collected) if collected else 0.0
+
+
+def _checkpoint_token_usage(checkpoint: OperationCheckpoint) -> Dict[str, int]:
+    total = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+    for operation in checkpoint.data["operations"].values():
+        for key in total:
+            total[key] += int(operation.get("token_usage", {}).get(key, 0))
+    return total
+
+
+def _prompt_hashes() -> Dict[str, str]:
+    return {
+        "flat_profile": stable_hash(
+            FLAT_PROFILE_EXTRACTION_SYSTEM_PROMPT
+            + FLAT_PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE
+        ),
+        "explicit_profile": stable_hash(
+            PROFILE_EXTRACTION_SYSTEM_PROMPT + PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE
+        ),
+        **{
+            f"state_{method}": stable_hash(prompt)
+            for method, prompt in STATE_SYSTEM_PROMPTS.items()
         },
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Experiment 1: Explicit User Modeling vs baselines")
+def _run_signature(
+    config: Exp1Config, llm: LLMClient, chat_files: List[Path]
+) -> str:
+    signature_config = asdict(config)
+    for key in ("output_dir", "continue_on_error", "fresh"):
+        signature_config.pop(key, None)
+    source_files = [
+        Path(__file__),
+        Path(__file__).with_name("exp1_protocol.py"),
+        Path(__file__).with_name("exp1_schema.py"),
+        Path(__file__).with_name("operation_checkpoint.py"),
+        Path(__file__).with_name("realtalk_evaluator.py"),
+    ]
+    return stable_hash({
+        "schema_version": 1,
+        "model": getattr(llm, "model", None),
+        "enable_thinking": getattr(llm, "enable_thinking", None),
+        "config": signature_config,
+        "source_hashes": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in source_files
+        },
+        "dataset_hashes": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in chat_files
+        },
+    })
+
+
+def _write_outputs(
+    output_dir: Path,
+    results: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+    manifest: Dict[str, Any],
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_text(
+        output_dir / "results.jsonl",
+        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in results),
+    )
+    _atomic_json(output_dir / "summary.json", summary)
+    _atomic_json(output_dir / "run_manifest.json", manifest)
+
+
+def _atomic_json(path: Path, value: Any) -> None:
+    _atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def _atomic_text(path: Path, value: str) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(value)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_context_sessions(value: str) -> Optional[int]:
+    if value.lower() == "all":
+        return None
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("context sessions must be positive or 'all'")
+    return parsed
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Experiment 1: causal current-user-state understanding"
+    )
     parser.add_argument("--dataset-dir", default="dataset")
     parser.add_argument("--output-dir", default="data/exp1_user_understanding")
     parser.add_argument("--min-context-sessions", type=int, default=2)
+    parser.add_argument("--context-sessions", type=_parse_context_sessions, default=3)
+    parser.add_argument("--max-context-chars", type=int, default=60000)
     parser.add_argument("--max-eval-points", type=int, default=15)
+    parser.add_argument("--operation-max-attempts", type=int, default=3)
     parser.add_argument("--chats", nargs="*", default=None)
+    parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--fresh", action="store_true")
     args = parser.parse_args()
-
-    config = Exp1Config(
+    run_exp1(Exp1Config(
         dataset_dir=args.dataset_dir,
         output_dir=args.output_dir,
         min_context_sessions=args.min_context_sessions,
+        context_sessions=args.context_sessions,
+        max_context_chars=args.max_context_chars,
         max_eval_points_per_chat=args.max_eval_points,
+        operation_max_attempts=args.operation_max_attempts,
         chat_filter=args.chats,
-    )
-    run_exp1(config)
+        continue_on_error=not args.fail_fast,
+        fresh=args.fresh,
+    ))
 
 
 if __name__ == "__main__":
