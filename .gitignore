@@ -7,3 +7,4 @@ user_profile_*.json
 logs/app.log
 data/exp1_user_understanding/
 data/exp1_smoke_*/
+data/exp1_continuous_*/
