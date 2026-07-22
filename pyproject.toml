@@ -20,6 +20,12 @@ dependencies = [
     "flask-sock>=0.7.0",
 ]
 
+[project.optional-dependencies]
+realtalk-eval = [
+    "torch>=2.5,<3",
+    "transformers>=4.48,<5",
+]
+
 [dependency-groups]
 dev = [
     "setuptools>=82.0.1",

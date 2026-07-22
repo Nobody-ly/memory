@@ -5,3 +5,5 @@ memory.json
 user_profile_*.json
 .env
 logs/app.log
+data/exp1_user_understanding/
+data/exp1_smoke_*/
