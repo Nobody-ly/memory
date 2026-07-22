@@ -30,7 +30,7 @@ class LLMClient:
             self.retry_base_seconds,
             float(os.getenv("LLM_RETRY_MAX_SECONDS", "30")),
         )
-        timeout_seconds = max(1.0, float(os.getenv("LLM_TIMEOUT_SECONDS", "90")))
+        timeout_seconds = max(1.0, float(os.getenv("LLM_TIMEOUT_SECONDS", "180")))
 
         self.client = OpenAI(
             api_key = os.getenv("API_KEY"),

@@ -92,6 +92,16 @@ class Exp1MockRunTests(unittest.TestCase):
             self.assertEqual(set(summary["comparison"]), set(METHODS))
             self.assertEqual(calls_after_first_run, 12)
             self.assertEqual(len(llm.calls), calls_after_first_run)
+            self.assertTrue(all(
+                kwargs["max_tokens"] == 512
+                for _, _, kwargs in llm.calls
+                if kwargs.get("response_schema") is not None
+            ))
+            self.assertTrue(all(
+                kwargs["max_tokens"] == 5000
+                for _, _, kwargs in llm.calls
+                if kwargs.get("response_schema") is None
+            ))
             self.assertEqual(resumed["num_eval_points"], 2)
             lines = (output / "results.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 2)

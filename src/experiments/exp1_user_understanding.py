@@ -297,7 +297,7 @@ def _cached_profile(
                 user_name=user_speaker, corpus=point["profile_text"]
             )
         return robust_parse_json(llm.chat(
-            system_prompt, user_prompt, temperature=0.3, max_tokens=3000
+            system_prompt, user_prompt, temperature=0.3, max_tokens=5000
         ))
 
     validator = _validate_flat_profile if profile_type == "flat" else _validate_explicit_profile
@@ -384,7 +384,7 @@ def _state_call(llm: LLMClient, system_prompt: str, user_prompt: str) -> Dict[st
         system_prompt,
         user_prompt,
         temperature=0.2,
-        max_tokens=250,
+        max_tokens=512,
         response_schema=STATE_RESPONSE_SCHEMA,
     )
     try:
