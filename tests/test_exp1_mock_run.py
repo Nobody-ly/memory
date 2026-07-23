@@ -26,9 +26,12 @@ class FakeLLM:
             self.assert_state_prompt_has_no_format_rules(system_prompt, user_prompt)
             if schema["name"] == "exp1_realtalk_reference_judgment":
                 return json.dumps({
+                    "emotion": "joy",
+                    "sentiment": "positive",
                     "topic": "work",
                     "reflective": True,
                     "grounding": False,
+                    "intimacy": 0.8,
                     "empathy": {
                         "emotional_reaction": 1,
                         "interpretation": 1,
@@ -119,9 +122,9 @@ class Exp1MockRunTests(unittest.TestCase):
                 max_eval_points_per_speaker=2,
             )
             llm = FakeLLM()
-            summary = run_exp1(config, llm=llm, label_evaluator=FakeLabels())
+            summary = run_exp1(config, llm=llm)
             calls_after_first_run = len(llm.calls)
-            resumed = run_exp1(config, llm=llm, label_evaluator=FakeLabels())
+            resumed = run_exp1(config, llm=llm)
 
             self.assertEqual(summary["num_eval_points"], 2)
             self.assertEqual(summary["num_speakers"], 1)
@@ -164,7 +167,7 @@ class Exp1MockRunTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 CheckpointSignatureError, "checkpoint does not match"
             ):
-                run_exp1(config, llm=llm, label_evaluator=AlternateFakeLabels())
+                run_exp1(config, llm=llm, label_evaluator=FakeLabels())
 
 
 if __name__ == "__main__":

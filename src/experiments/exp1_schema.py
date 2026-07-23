@@ -109,6 +109,16 @@ REFERENCE_JUDGMENT_SCHEMA: Dict[str, Any] = {
     "schema": {
         "type": "object",
         "properties": {
+            "emotion": {
+                "type": "string",
+                "enum": list(EMOTION_LABELS),
+                "description": "Dominant emotion expressed by the observed message.",
+            },
+            "sentiment": {
+                "type": "string",
+                "enum": list(SENTIMENT_LABELS),
+                "description": "Overall sentiment expressed by the observed message.",
+            },
             "topic": {
                 "type": "string",
                 "minLength": 1,
@@ -128,6 +138,12 @@ REFERENCE_JUDGMENT_SCHEMA: Dict[str, Any] = {
                     "Whether the message builds mutual understanding through "
                     "clarification, confirmation, follow-up, or shared detail."
                 ),
+            },
+            "intimacy": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Interpersonal intimacy expressed, from 0 to 1.",
             },
             "empathy": {
                 "type": "object",
@@ -158,7 +174,15 @@ REFERENCE_JUDGMENT_SCHEMA: Dict[str, Any] = {
                 "additionalProperties": False,
             },
         },
-        "required": ["topic", "reflective", "grounding", "empathy"],
+        "required": [
+            "emotion",
+            "sentiment",
+            "topic",
+            "reflective",
+            "grounding",
+            "intimacy",
+            "empathy",
+        ],
         "additionalProperties": False,
     },
 }
@@ -218,19 +242,5 @@ def normalize_state(value: Any) -> Dict[str, Any]:
 
 
 def normalize_reference_judgment(value: Any) -> Dict[str, Any]:
-    """Validate the LLM-judged subset of a REALTALK reference annotation."""
-    if not isinstance(value, dict):
-        raise ValueError("reference judgment must be an object")
-    expanded = {
-        "emotion": EMOTION_LABELS[0],
-        "sentiment": SENTIMENT_LABELS[0],
-        "intimacy": 0.0,
-        **value,
-    }
-    normalized = normalize_state(expanded)
-    return {
-        "topic": normalized["topic"],
-        "reflective": normalized["reflective"],
-        "grounding": normalized["grounding"],
-        "empathy": normalized["empathy"],
-    }
+    """Validate a complete Kimi-generated reference state."""
+    return normalize_state(value)

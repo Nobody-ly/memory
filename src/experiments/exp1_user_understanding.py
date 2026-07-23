@@ -119,14 +119,22 @@ def run_exp1(
     if not splits:
         raise ValueError("no REALTALK speaker splits matched the configuration")
     llm = llm or LLMClient()
-    label_evaluator = label_evaluator or RealTalkLabelEvaluator()
+    reference_metadata = (
+        label_evaluator.metadata()
+        if label_evaluator is not None
+        else {
+            "provider": "same_kimi_llm_as_method_predictions",
+            "model": getattr(llm, "model", None),
+            "strict_schema": REFERENCE_JUDGMENT_SCHEMA["name"],
+        }
+    )
 
     output_dir = Path(config.output_dir)
     checkpoint_path = output_dir / "checkpoint.json"
     if config.fresh and checkpoint_path.exists():
         checkpoint_path.unlink()
     signature = _run_signature(
-        config, llm, splits, label_evaluator.metadata()
+        config, llm, splits, reference_metadata
     )
     checkpoint = OperationCheckpoint(checkpoint_path, signature)
     started = perf_counter()
@@ -313,12 +321,15 @@ def run_exp1(
                 "three-session paper setting; each Cb target receives all prior "
                 "real merged turns in the selected test segment"
             ),
-            "emotion_and_sentiment": "pinned REALTALK classifiers on human target messages",
+            "reference_state": (
+                "same configured Kimi model labels the complete state of each "
+                "human target message under a strict schema"
+            ),
             "reflectiveness_grounding_empathy": (
                 "strict-schema LLM judgments using REALTALK definitions and "
                 "the observed human target message with its prior context"
             ),
-            "intimacy": "pinned REALTALK intimacy regressor on human target messages",
+            "intimacy": "same configured Kimi reference judgment on human target messages",
             "topic": (
                 "Exp1-specific extension retained for analysis only; excluded "
                 "from primary ranking and significance comparisons"
@@ -334,7 +345,7 @@ def run_exp1(
     )
     manifest.update({
         "run_signature": signature,
-        "reference_evaluator": label_evaluator.metadata(),
+        "reference_evaluator": reference_metadata,
         "reference_judge": {
             "provider": "same_llm_client_as_method_predictions",
             "model": getattr(llm, "model", None),
@@ -430,20 +441,13 @@ def _cached_profile(
 def _cached_reference(
     checkpoint: OperationCheckpoint,
     llm: LLMClient,
-    evaluator: RealTalkLabelEvaluator,
+    evaluator: Optional[RealTalkLabelEvaluator],
     config: Exp1Config,
     result_id: str,
     target_speaker: str,
     history_text: str,
     target_message: str,
 ) -> Dict[str, Any]:
-    label_key = f"reference_labels:{result_id}:{stable_hash(target_message)}"
-    labels = checkpoint.execute(
-        label_key,
-        lambda: evaluator.annotate(target_message),
-        _validate_reference_labels,
-        max_attempts=config.operation_max_attempts,
-    )
     judgment_hash = stable_hash({
         "speaker": target_speaker,
         "history": history_text,
@@ -468,10 +472,17 @@ def _cached_reference(
         max_attempts=config.operation_max_attempts,
         usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
     )
-    return {
-        **labels,
-        **judgment,
-    }
+    if evaluator is None:
+        return judgment
+
+    label_key = f"reference_labels:{result_id}:{stable_hash(target_message)}"
+    labels = checkpoint.execute(
+        label_key,
+        lambda: evaluator.annotate(target_message),
+        _validate_reference_labels,
+        max_attempts=config.operation_max_attempts,
+    )
+    return {**judgment, **labels}
 
 
 def _cached_prediction(

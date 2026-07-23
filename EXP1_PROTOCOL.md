@@ -30,14 +30,19 @@ Bayesian 更新、current state、memory、RAG、typed context block 或新增 b
 
 ## 指标
 
-论文对齐并保留原始值的指标：
+保留与论文对应的数据维度，但按照当前实验约定统一使用同配置 Kimi 对真实目标消息
+生成参考状态：
 
-- Emotion Accuracy：固定 revision 的 Cardiff emotion classifier 生成参考标签。
-- Sentiment Accuracy：固定 revision 的 Cardiff sentiment classifier 生成参考标签。
+- Emotion Accuracy：Kimi 严格枚举标签。
+- Sentiment Accuracy：Kimi 严格枚举标签。
 - Reflectiveness Accuracy：按 REALTALK 定义进行严格布尔判断。
 - Grounding Accuracy：按 REALTALK 定义进行严格布尔判断。
-- Intimacy Absolute Difference：固定 revision 的 Cardiff intimacy regressor。
+- Intimacy Absolute Difference：Kimi 输出 0 到 1 的参考值。
 - Empathy Absolute Difference：EPITOME 三项得分之和的绝对差。
+
+参考状态与三种方法使用同一个 Kimi 配置，但参考状态只读取真实历史和真实目标消息，
+不读取任何一种方法的画像或预测结果。这样不需要下载额外权重，也不会对某个方法提供
+额外信息。
 
 Exp1 还保留 Emotion/Sentiment Macro-F1，便于检查类别不均衡。Topic
 Consistency 是原 Exp1 的扩展指标，只作探索分析，不参与主排名和配对显著性结论。
@@ -52,7 +57,7 @@ ROUGE 与 BERTScore 不适用，因为 Exp1 不生成下一条消息。
 ## 运行
 
 ```powershell
-uv sync --extra realtalk-eval
+uv sync
 python -m unittest discover -s tests -v
 
 python -m src.experiments.exp1_user_understanding `
@@ -80,7 +85,7 @@ python -m src.experiments.exp1_user_understanding `
 - `results.jsonl`：每个完整三方法 triplet 一行。
 - `metric_records.jsonl`：逐样本逐方法长表，包含后续统计所需原始值。
 - `summary.json`：macro/micro 指标、分类明细、提升量和配对结果。
-- `run_manifest.json`：commit、源码哈希、模型、Schema、分类器 revision 和配置。
+- `run_manifest.json`：commit、源码哈希、Kimi 模型、Schema 和运行配置。
 - `checkpoint.json`：原子调用缓存与恢复状态。
 
 网络失败由 LLM 客户端最多重试 6 次，逻辑或 Schema 失败最多重试 3 次。失败测试点
