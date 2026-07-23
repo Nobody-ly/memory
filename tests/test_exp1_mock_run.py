@@ -98,7 +98,7 @@ class Exp1MockRunTests(unittest.TestCase):
                 if kwargs.get("response_schema") is not None
             ))
             self.assertTrue(all(
-                kwargs["max_tokens"] == 5000
+                kwargs["max_tokens"] == config.profile_max_tokens
                 for _, _, kwargs in llm.calls
                 if kwargs.get("response_schema") is None
             ))

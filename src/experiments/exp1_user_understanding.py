@@ -77,6 +77,7 @@ class Exp1Config:
     min_context_sessions: int = 2
     context_sessions: Optional[int] = 3
     max_context_chars: int = 60000
+    profile_max_tokens: int = 8000
     max_eval_points_per_chat: int = 15
     operation_max_attempts: int = 3
     chat_filter: Optional[List[str]] = None
@@ -323,7 +324,10 @@ def _cached_profile(
                 user_name=user_speaker, corpus=point["profile_text"]
             )
         return robust_parse_json(llm.chat(
-            system_prompt, user_prompt, temperature=0.3, max_tokens=5000
+            system_prompt,
+            user_prompt,
+            temperature=0.3,
+            max_tokens=config.profile_max_tokens,
         ))
 
     validator = _validate_flat_profile if profile_type == "flat" else _validate_explicit_profile
@@ -808,6 +812,7 @@ def main() -> None:
     parser.add_argument("--min-context-sessions", type=int, default=2)
     parser.add_argument("--context-sessions", type=_parse_context_sessions, default=3)
     parser.add_argument("--max-context-chars", type=int, default=60000)
+    parser.add_argument("--profile-max-tokens", type=int, default=8000)
     parser.add_argument("--max-eval-points", type=int, default=15)
     parser.add_argument("--operation-max-attempts", type=int, default=3)
     parser.add_argument("--chats", nargs="*", default=None)
@@ -820,6 +825,7 @@ def main() -> None:
         min_context_sessions=args.min_context_sessions,
         context_sessions=args.context_sessions,
         max_context_chars=args.max_context_chars,
+        profile_max_tokens=args.profile_max_tokens,
         max_eval_points_per_chat=args.max_eval_points,
         operation_max_attempts=args.operation_max_attempts,
         chat_filter=args.chats,

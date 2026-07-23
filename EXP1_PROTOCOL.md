@@ -43,6 +43,8 @@ python -m src.experiments.exp1_user_understanding `
 
 完整运行可删除 `--chats`，并将 `--max-eval-points` 调整为所需数量或 `0`。上下文可用
 `--context-sessions 3`、其他正整数或 `all` 调整；`--max-context-chars 0` 表示关闭字符上限。
+画像生成默认允许最多 `8000` 输出 token，可通过 `--profile-max-tokens` 调整；该上限仅防止完整
+JSON 被模型截断，不对已经完整结束的画像做定长裁剪。
 
 ## 输出与恢复
 
