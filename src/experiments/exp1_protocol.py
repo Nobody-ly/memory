@@ -1,4 +1,4 @@
-"""Causal, provider-independent data protocol for Experiment 1."""
+"""REALTALK-aligned, provider-independent data protocol for Experiment 1."""
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +6,63 @@ import json
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 from .persona_simulation import flatten_messages, session_keys
+
+
+# Train/test conversation assignments reported in REALTALK Table 8.
+# A split is speaker-specific: the same chat may train one speaker and test
+# their partner.
+REALTALK_PERSONA_SPLITS: Tuple[Dict[str, str], ...] = (
+    {
+        "speaker": "Emi",
+        "train_chat": "Chat_4_Emi_Paola.json",
+        "test_chat": "Chat_1_Emi_Elise.json",
+    },
+    {
+        "speaker": "Nicolas",
+        "train_chat": "Chat_5_Nicolas_Nebraas.json",
+        "test_chat": "Chat_6_Vanessa_Nicolas.json",
+    },
+    {
+        "speaker": "Kevin",
+        "train_chat": "Chat_3_Kevin_Paola.json",
+        "test_chat": "Chat_2_Kevin_Elise.json",
+    },
+    {
+        "speaker": "Akib",
+        "train_chat": "Chat_9_Fahim_Akib.json",
+        "test_chat": "Chat_8_Akib_Muhhamed.json",
+    },
+    {
+        "speaker": "Muhhamed",
+        "train_chat": "Chat_10_Fahim_Muhhamed.json",
+        "test_chat": "Chat_8_Akib_Muhhamed.json",
+    },
+    {
+        "speaker": "Nebraas",
+        "train_chat": "Chat_5_Nicolas_Nebraas.json",
+        "test_chat": "Chat_7_Nebraas_Vanessa.json",
+    },
+    {
+        "speaker": "Paola",
+        "train_chat": "Chat_4_Emi_Paola.json",
+        "test_chat": "Chat_3_Kevin_Paola.json",
+    },
+    {
+        "speaker": "Vanessa",
+        "train_chat": "Chat_7_Nebraas_Vanessa.json",
+        "test_chat": "Chat_6_Vanessa_Nicolas.json",
+    },
+    {
+        "speaker": "elise",
+        "train_chat": "Chat_2_Kevin_Elise.json",
+        "test_chat": "Chat_1_Emi_Elise.json",
+    },
+    {
+        "speaker": "Fahim Khan",
+        "train_chat": "Chat_10_Fahim_Muhhamed.json",
+        "test_chat": "Chat_9_Fahim_Akib.json",
+    },
+)
 
 
 def merge_consecutive_utterances(chat: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -43,8 +100,8 @@ def merge_consecutive_utterances(chat: Dict[str, Any]) -> List[Dict[str, Any]]:
     return merged
 
 
-def resolve_chat_roles(chat: Dict[str, Any]) -> Tuple[str, str, List[str]]:
-    """Resolve user/agent roles and report recoverable metadata mismatches."""
+def message_speakers(chat: Dict[str, Any]) -> List[str]:
+    """Return the two actual message speakers, preserving first appearance."""
     actual: List[str] = []
     for turn in flatten_messages(chat):
         speaker = turn["speaker"]
@@ -52,6 +109,26 @@ def resolve_chat_roles(chat: Dict[str, Any]) -> Tuple[str, str, List[str]]:
             actual.append(speaker)
     if len(actual) != 2:
         raise ValueError(f"expected exactly two message speakers, found: {actual}")
+    return actual
+
+
+def canonical_speaker(chat: Dict[str, Any], requested: str) -> str:
+    """Resolve a paper split speaker against the message data."""
+    actual = message_speakers(chat)
+    matched = next(
+        (speaker for speaker in actual if speaker.casefold() == requested.casefold()),
+        None,
+    )
+    if matched is None:
+        raise ValueError(
+            f"split speaker {requested!r} is absent from message speakers {actual}"
+        )
+    return matched
+
+
+def resolve_chat_roles(chat: Dict[str, Any]) -> Tuple[str, str, List[str]]:
+    """Resolve legacy user/agent roles and report recoverable mismatches."""
+    actual = message_speakers(chat)
 
     names = chat.get("name") or {}
     declared_user = str(names.get("speaker_1", "")).strip()
@@ -75,74 +152,129 @@ def resolve_chat_roles(chat: Dict[str, Any]) -> Tuple[str, str, List[str]]:
     return user, agent, warnings
 
 
-def build_session_boundary_points(
+def select_realtalk_splits(
+    dataset_dir: str | Any,
+    chat_filter: Sequence[str] | None = None,
+    speaker_filter: Sequence[str] | None = None,
+) -> List[Dict[str, str]]:
+    """Select complete paper-reported speaker splits available in a dataset."""
+    from pathlib import Path
+
+    dataset = Path(dataset_dir)
+    normalized_chats = {
+        value.casefold() for value in (chat_filter or ()) if str(value).strip()
+    }
+    normalized_speakers = {
+        value.casefold() for value in (speaker_filter or ()) if str(value).strip()
+    }
+    selected: List[Dict[str, str]] = []
+    for split in REALTALK_PERSONA_SPLITS:
+        if normalized_chats and not (
+            split["train_chat"].casefold() in normalized_chats
+            or split["test_chat"].casefold() in normalized_chats
+        ):
+            continue
+        if normalized_speakers and split["speaker"].casefold() not in normalized_speakers:
+            continue
+        missing = [
+            name
+            for name in (split["train_chat"], split["test_chat"])
+            if not (dataset / name).exists()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"incomplete REALTALK split for {split['speaker']}: missing {missing}"
+            )
+        selected.append(dict(split))
+    return selected
+
+
+def build_profile_corpus(
     chat: Dict[str, Any],
-    user_speaker: str,
-    min_context_sessions: int = 2,
-    context_sessions: int | None = 3,
+    target_speaker: str,
+    profile_sessions: int = 3,
+) -> Dict[str, Any]:
+    """Build the fixed Ca corpus used to derive a speaker representation."""
+    if profile_sessions < 1:
+        raise ValueError("profile_sessions must be at least 1")
+    speaker = canonical_speaker(chat, target_speaker)
+    selected_sessions = session_keys(chat)[:profile_sessions]
+    if len(selected_sessions) < profile_sessions:
+        raise ValueError(
+            f"{speaker} train chat has only {len(selected_sessions)} sessions; "
+            f"{profile_sessions} required"
+        )
+    selected = set(selected_sessions)
+    turns = [
+        turn for turn in merge_consecutive_utterances(chat)
+        if turn["session_id"] in selected
+    ]
+    if not any(turn["speaker"].casefold() == speaker.casefold() for turn in turns):
+        raise ValueError(f"no training messages found for {speaker}")
+    text = format_turns(turns)
+    return {
+        "speaker": speaker,
+        "sessions": selected_sessions,
+        "turns": turns,
+        "text": text,
+        "history_hash": stable_hash(text),
+    }
+
+
+def build_message_level_points(
+    chat: Dict[str, Any],
+    target_speaker: str,
+    test_sessions: int = 3,
     max_context_chars: int = 60000,
-    max_eval_points: int = 15,
+    max_eval_points: int = 0,
 ) -> List[Dict[str, Any]]:
-    """Create one causal target at each eligible session boundary."""
-    if min_context_sessions < 1:
-        raise ValueError("min_context_sessions must be at least 1")
-    if context_sessions is not None and context_sessions < 1:
-        raise ValueError("context_sessions must be positive or None for all")
+    """Build rolling message-level targets from the selected Cb sessions.
+
+    Each target is one merged message by ``target_speaker``. Its history is
+    every real merged turn before it in the selected test segment. Exp1 adds
+    the observed target message later because it classifies current state
+    instead of generating the next message.
+    """
+    if test_sessions < 1:
+        raise ValueError("test_sessions must be at least 1")
     if max_context_chars < 0:
         raise ValueError("max_context_chars must be non-negative")
 
-    sessions = session_keys(chat)
-    turns = merge_consecutive_utterances(chat)
+    speaker = canonical_speaker(chat, target_speaker)
+    selected_sessions = session_keys(chat)[:test_sessions]
+    if len(selected_sessions) < test_sessions:
+        raise ValueError(
+            f"{speaker} test chat has only {len(selected_sessions)} sessions; "
+            f"{test_sessions} required"
+        )
+    selected = set(selected_sessions)
+    turns = [
+        turn for turn in merge_consecutive_utterances(chat)
+        if turn["session_id"] in selected
+    ]
     points: List[Dict[str, Any]] = []
-    for boundary_index in range(min_context_sessions, len(sessions)):
-        completed_sessions = sessions[:boundary_index]
-        target_session = sessions[boundary_index]
-        target_position = next(
-            (
-                index
-                for index, turn in enumerate(turns)
-                if turn["session_id"] == target_session
-                and turn["speaker"].casefold() == user_speaker.casefold()
-            ),
-            None,
-        )
-        if target_position is None:
+    for target_position, target in enumerate(turns):
+        if target["speaker"].casefold() != speaker.casefold():
             continue
-        target = turns[target_position]
-        profile_turns = [
-            turn for turn in turns if turn["session_id"] in completed_sessions
-        ]
-        selected_sessions = (
-            completed_sessions
-            if context_sessions is None
-            else completed_sessions[-context_sessions:]
-        )
-        context_turns = [
-            turn
-            for index, turn in enumerate(turns[:target_position])
-            if turn["session_id"] in selected_sessions
-            or turn["session_id"] == target_session
-        ]
+        context_turns = list(turns[:target_position])
         context_turns, context_truncated = trim_oldest_turns(
             context_turns, max_context_chars
         )
-        profile_text = format_turns(profile_turns)
         context_text = format_turns(context_turns)
+        target_index = len(points)
         points.append({
-            "eval_id": f"session_boundary_{boundary_index}",
-            "sample_id": f"session_boundary_{boundary_index}:{target['turn_id']}",
-            "boundary_index": boundary_index,
-            "completed_sessions": list(completed_sessions),
-            "target_session": target_session,
+            "eval_id": f"message_{target_index}",
+            "sample_id": f"message_{target_index}:{target['turn_id']}",
+            "message_level_index": target_index,
+            "test_sessions": list(selected_sessions),
+            "target_session": target["session_id"],
             "target": target,
             "target_message": target["content"],
-            "profile_turns": profile_turns,
-            "profile_text": profile_text,
-            "profile_history_hash": stable_hash(profile_text),
             "context_turns": context_turns,
             "context_text": context_text,
             "context_truncated": context_truncated,
             "context_session_count": len(set(t["session_id"] for t in context_turns)),
+            "history_hash": stable_hash(context_text),
         })
     if max_eval_points > 0:
         return points[:max_eval_points]

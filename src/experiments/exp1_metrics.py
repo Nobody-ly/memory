@@ -78,27 +78,44 @@ def chat_macro_report(
     labels: Sequence[str],
 ) -> Dict[str, Any]:
     """Average independently computed chat-level classification metrics."""
-    by_chat: Dict[str, List[Dict[str, str]]] = {}
-    for record in records:
-        by_chat.setdefault(record["chat_file"], []).append(record)
+    return group_macro_report(records, labels, "chat_file", "chats")
 
-    per_chat: Dict[str, Dict[str, Any]] = {}
-    for chat_file, chat_records in sorted(by_chat.items()):
-        per_chat[chat_file] = classification_report(
-            [record["reference"] for record in chat_records],
-            [record["prediction"] for record in chat_records],
+
+def speaker_macro_report(
+    records: Sequence[Dict[str, str]],
+    labels: Sequence[str],
+) -> Dict[str, Any]:
+    """Average independently computed target-speaker metrics."""
+    return group_macro_report(records, labels, "speaker", "speakers")
+
+
+def group_macro_report(
+    records: Sequence[Dict[str, str]],
+    labels: Sequence[str],
+    group_key: str,
+    group_label: str,
+) -> Dict[str, Any]:
+    by_group: Dict[str, List[Dict[str, str]]] = {}
+    for record in records:
+        by_group.setdefault(record[group_key], []).append(record)
+
+    per_group: Dict[str, Dict[str, Any]] = {}
+    for group, group_records in sorted(by_group.items()):
+        per_group[group] = classification_report(
+            [record["reference"] for record in group_records],
+            [record["prediction"] for record in group_records],
             labels,
         )
 
     return {
-        "num_chats": len(per_chat),
+        f"num_{group_label}": len(per_group),
         "accuracy": round(
-            _mean(report["accuracy"] for report in per_chat.values()), 6
+            _mean(report["accuracy"] for report in per_group.values()), 6
         ),
         "macro_f1": round(
-            _mean(report["macro_f1"] for report in per_chat.values()), 6
+            _mean(report["macro_f1"] for report in per_group.values()), 6
         ),
-        "per_chat": per_chat,
+        f"per_{group_label[:-1]}": per_group,
     }
 
 
@@ -156,9 +173,12 @@ def build_metric_records(
             reference = result["reference"]
             records.append({
                 "result_id": result["result_id"],
+                "speaker": result["speaker"],
+                "train_chat_file": result["train_chat_file"],
+                "test_chat_file": result["test_chat_file"],
                 "chat_file": result["chat_file"],
                 "eval_id": result["eval_id"],
-                "boundary_index": result["boundary_index"],
+                "message_level_index": result["message_level_index"],
                 "target_session": result["target_session"],
                 "user_speaker": result.get("user_speaker"),
                 "target_dia_ids": result.get("target_dia_ids", []),
@@ -177,8 +197,30 @@ def build_metric_records(
                 "topic_consistency": result["methods"][method]["scores"][
                     "topic_consistency"
                 ],
-                "completed_profile_sessions": result.get("profile", {}).get(
-                    "completed_sessions"
+                "reference_reflective": reference["reflective"],
+                "predicted_reflective": prediction["reflective"],
+                "reflectiveness_correct": (
+                    prediction["reflective"] == reference["reflective"]
+                ),
+                "reference_grounding": reference["grounding"],
+                "predicted_grounding": prediction["grounding"],
+                "grounding_correct": (
+                    prediction["grounding"] == reference["grounding"]
+                ),
+                "reference_intimacy": reference["intimacy"],
+                "predicted_intimacy": prediction["intimacy"],
+                "intimacy_absolute_difference": result["methods"][method][
+                    "scores"
+                ]["intimacy_absolute_difference"],
+                "reference_empathy": reference["empathy"],
+                "predicted_empathy": prediction["empathy"],
+                "reference_empathy_total": sum(reference["empathy"].values()),
+                "predicted_empathy_total": sum(prediction["empathy"].values()),
+                "empathy_absolute_difference": result["methods"][method][
+                    "scores"
+                ]["empathy_absolute_difference"],
+                "profile_train_sessions": result.get("profile", {}).get(
+                    "train_sessions"
                 ),
                 "profile_history_hash": result.get("profile", {}).get(
                     "history_hash"
