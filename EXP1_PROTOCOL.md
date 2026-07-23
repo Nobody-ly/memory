@@ -23,9 +23,12 @@ Bayesian 更新、current state、memory、RAG 或额外 baseline。
 
 - Emotion：固定 revision 的 Cardiff REALTALK emotion classifier。
 - Sentiment：固定 revision 的 Cardiff REALTALK sentiment classifier。
-- Topic：保留 Exp1 原有扩展指标，由同一严格 Schema 生成参考 topic。
-- Emotion/Sentiment 使用严格标签相等；Topic 使用词项召回重合度。
-- 主结果使用 chat-level macro average，同时保存 micro average。
+- Topic：保留 Exp1 原有扩展指标，由同一严格 Schema 生成参考 topic，但不参与主排名。
+- Emotion/Sentiment 使用严格标签相等；Topic 继续使用原来的词项召回重合度。
+- 主指标是 Emotion Accuracy 和 Sentiment Accuracy；辅助报告两者的 Macro-F1。
+- 保存各类别 precision、recall、F1、support、预测数量和完整混淆矩阵。
+- 主结果使用 chat-level macro average，同时保存全局 micro 统计。
+- Topic 单独标为 exploratory metric，不参与主提升量或配对统计。
 
 ## 安装与运行
 
@@ -44,9 +47,17 @@ python -m src.experiments.exp1_user_understanding `
 ## 输出与恢复
 
 - `results.jsonl`：完整成功 triplet；每个测试点只写一行。
-- `summary.json`：三方法 macro/micro 指标、提升量和诊断信息。
+- `metric_records.jsonl`：逐样本逐方法长表，可离线重算分类指标和后续统计。
+- `summary.json`：三方法 macro/micro 指标、分类明细、提升量、配对结果和诊断信息。
 - `run_manifest.json`：commit、源码哈希、模型、Schema、分类器 revision 和配置。
 - `checkpoint.json`：原子调用缓存和恢复状态。
 
 网络失败最多重试 6 次，Schema/解析失败最多重试 3 次。失败测试点不会记 0 分，
 而是记录为 `excluded_incomplete_triplet`；恢复运行只补缺失操作，不重复统计成功结果。
+
+已有实验结果可完全离线重算，不产生 API 调用：
+
+```powershell
+python -m src.experiments.exp1_recompute_metrics `
+  data/exp1_continuous_final_1x5/results.jsonl
+```

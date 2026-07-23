@@ -27,7 +27,18 @@ from .exp1_protocol import (
     resolve_chat_roles,
     stable_hash,
 )
-from .exp1_schema import STATE_RESPONSE_SCHEMA, normalize_state
+from .exp1_metrics import (
+    build_metric_records,
+    chat_macro_report,
+    classification_report,
+    paired_correctness_counts,
+)
+from .exp1_schema import (
+    EMOTION_LABELS,
+    SENTIMENT_LABELS,
+    STATE_RESPONSE_SCHEMA,
+    normalize_state,
+)
 from .experiment_utils import load_chat_files, robust_parse_json
 from .operation_checkpoint import OperationCheckpoint
 from .realtalk_evaluator import RealTalkLabelEvaluator
@@ -36,6 +47,9 @@ from .result_provenance import build_run_manifest
 
 METHODS = ("self_model", "flat_profile", "explicit_model")
 PROFILE_LAYERS = ("core", "regulation", "cognition", "identity", "behavior")
+PRIMARY_METRICS = ("emotion_accuracy", "sentiment_accuracy")
+SUPPLEMENTARY_METRICS = ("emotion_macro_f1", "sentiment_macro_f1")
+EXTENDED_METRICS = ("topic_consistency",)
 
 STATE_SYSTEM_PROMPTS = {
     "self_model": (
@@ -227,7 +241,10 @@ def run_exp1(
         "primary_aggregation": "chat_macro",
         "realtalk_alignment": {
             "emotion_and_sentiment": "pinned REALTALK classifiers on human target messages",
-            "topic": "Exp1-specific extension, not a direct REALTALK benchmark metric",
+            "topic": (
+                "Exp1-specific extension retained for analysis only; excluded "
+                "from primary ranking and significance comparisons"
+            ),
             "persona_consistency": (
                 "separate diagnostic using absolute cross-conversation differences "
                 "for Exp1-available EI attributes only"
@@ -241,6 +258,15 @@ def run_exp1(
         "run_signature": signature,
         "reference_evaluator": label_evaluator.metadata(),
         "response_schema": STATE_RESPONSE_SCHEMA,
+        "metric_protocol": _metric_protocol(),
+        "output_contract": {
+            "results.jsonl": "canonical complete per-sample triplets",
+            "metric_records.jsonl": (
+                "derived long-form records for offline statistics and audits"
+            ),
+            "summary.json": "aggregated metrics and diagnostics",
+            "checkpoint.json": "resumable operation cache",
+        },
         "network_retry_max_attempts": getattr(llm, "max_retries", None),
         "operation_retry_max_attempts": config.operation_max_attempts,
         "prompt_hashes": _prompt_hashes(),
@@ -446,6 +472,7 @@ def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "num_eval_points": 0,
             "num_chats": 0,
             "persona_consistency_diagnostic": {},
+            "metric_protocol": _metric_protocol(),
         }
     by_chat: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for result in results:
@@ -455,27 +482,78 @@ def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     for method in METHODS:
         per_chat: List[Dict[str, float]] = []
         all_scores: List[Dict[str, float]] = []
+        emotion_records: List[Dict[str, str]] = []
+        sentiment_records: List[Dict[str, str]] = []
         for chat_results in by_chat.values():
             scores = [item["methods"][method]["scores"] for item in chat_results]
             all_scores.extend(scores)
+            emotion_records.extend({
+                "chat_file": item["chat_file"],
+                "reference": item["reference"]["emotion"],
+                "prediction": item["methods"][method]["prediction"]["emotion"],
+            } for item in chat_results)
+            sentiment_records.extend({
+                "chat_file": item["chat_file"],
+                "reference": item["reference"]["sentiment"],
+                "prediction": item["methods"][method]["prediction"]["sentiment"],
+            } for item in chat_results)
             per_chat.append({
                 metric: _mean(score[metric] for score in scores)
                 for metric in (
                     "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
                 )
             })
+
+        emotion_global = classification_report(
+            [record["reference"] for record in emotion_records],
+            [record["prediction"] for record in emotion_records],
+            EMOTION_LABELS,
+        )
+        sentiment_global = classification_report(
+            [record["reference"] for record in sentiment_records],
+            [record["prediction"] for record in sentiment_records],
+            SENTIMENT_LABELS,
+        )
+        emotion_chat_macro = chat_macro_report(emotion_records, EMOTION_LABELS)
+        sentiment_chat_macro = chat_macro_report(
+            sentiment_records, SENTIMENT_LABELS
+        )
         comparison[method] = {
             "chat_macro": {
-                metric: round(_mean(chat[metric] for chat in per_chat), 4)
-                for metric in (
-                    "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
-                )
+                "emotion_accuracy": round(
+                    _mean(chat["emotion_accuracy"] for chat in per_chat), 4
+                ),
+                "sentiment_accuracy": round(
+                    _mean(chat["sentiment_accuracy"] for chat in per_chat), 4
+                ),
+                "emotion_macro_f1": round(
+                    emotion_chat_macro["macro_f1"], 4
+                ),
+                "sentiment_macro_f1": round(
+                    sentiment_chat_macro["macro_f1"], 4
+                ),
+                "topic_consistency": round(
+                    _mean(chat["topic_consistency"] for chat in per_chat), 4
+                ),
             },
             "micro": {
-                metric: round(_mean(score[metric] for score in all_scores), 4)
-                for metric in (
-                    "emotion_accuracy", "sentiment_accuracy", "topic_consistency"
-                )
+                "emotion_accuracy": round(emotion_global["accuracy"], 4),
+                "sentiment_accuracy": round(sentiment_global["accuracy"], 4),
+                "emotion_macro_f1": round(emotion_global["macro_f1"], 4),
+                "sentiment_macro_f1": round(sentiment_global["macro_f1"], 4),
+                "topic_consistency": round(
+                    _mean(score["topic_consistency"] for score in all_scores), 4
+                ),
+            },
+            "classification_details": {
+                "emotion": {
+                    "global": emotion_global,
+                    "chat_macro": emotion_chat_macro,
+                },
+                "sentiment": {
+                    "global": sentiment_global,
+                    "chat_macro": sentiment_chat_macro,
+                },
             },
             "num_evaluations": len(all_scores),
         }
@@ -489,6 +567,9 @@ def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "comparison": comparison,
         "improvement_chat_macro": _improvements(comparison),
+        "extended_improvement_chat_macro": _extended_improvements(comparison),
+        "paired_outcomes": _paired_outcomes(results),
+        "metric_protocol": _metric_protocol(),
         "num_eval_points": len(results),
         "num_chats": len(by_chat),
         "portrait_entropy": {
@@ -502,13 +583,58 @@ def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _improvements(comparison: Dict[str, Any]) -> Dict[str, float]:
     values: Dict[str, float] = {}
     for baseline in ("self_model", "flat_profile"):
-        for metric in ("emotion_accuracy", "sentiment_accuracy", "topic_consistency"):
+        for metric in PRIMARY_METRICS + SUPPLEMENTARY_METRICS:
             values[f"explicit_vs_{baseline}_{metric}"] = round(
                 comparison["explicit_model"]["chat_macro"][metric]
                 - comparison[baseline]["chat_macro"][metric],
                 4,
             )
     return values
+
+
+def _extended_improvements(comparison: Dict[str, Any]) -> Dict[str, float]:
+    values: Dict[str, float] = {}
+    for baseline in ("self_model", "flat_profile"):
+        for metric in EXTENDED_METRICS:
+            values[f"explicit_vs_{baseline}_{metric}"] = round(
+                comparison["explicit_model"]["chat_macro"][metric]
+                - comparison[baseline]["chat_macro"][metric],
+                4,
+            )
+    return values
+
+
+def _paired_outcomes(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        f"explicit_model_vs_{baseline}": {
+            field: paired_correctness_counts(
+                results, "explicit_model", baseline, field
+            )
+            for field in ("emotion", "sentiment")
+        }
+        for baseline in ("self_model", "flat_profile")
+    }
+
+
+def _metric_protocol() -> Dict[str, Any]:
+    return {
+        "primary_metrics": list(PRIMARY_METRICS),
+        "supplementary_metrics": list(SUPPLEMENTARY_METRICS),
+        "extended_metrics": list(EXTENDED_METRICS),
+        "primary_ranking_aggregation": "chat_macro",
+        "macro_f1": (
+            "unweighted mean over labels present in reference or prediction; "
+            "fixed-label value is also retained in classification_details"
+        ),
+        "topic_policy": (
+            "retained unchanged for exploratory analysis; not used for primary "
+            "ranking or paired outcome comparisons"
+        ),
+        "paired_outcomes": (
+            "raw paired correctness contingency counts only; formal statistical "
+            "test and confidence interval can be recomputed without API calls"
+        ),
+    }
 
 
 def _persona_consistency(results: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -601,6 +727,7 @@ def _run_signature(
         signature_config.pop(key, None)
     source_files = [
         Path(__file__),
+        Path(__file__).with_name("exp1_metrics.py"),
         Path(__file__).with_name("exp1_protocol.py"),
         Path(__file__).with_name("exp1_schema.py"),
         Path(__file__).with_name("operation_checkpoint.py"),
@@ -633,6 +760,14 @@ def _write_outputs(
     _atomic_text(
         output_dir / "results.jsonl",
         "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in results),
+    )
+    metric_records = build_metric_records(results, METHODS)
+    _atomic_text(
+        output_dir / "metric_records.jsonl",
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in metric_records
+        ),
     )
     _atomic_json(output_dir / "summary.json", summary)
     _atomic_json(output_dir / "run_manifest.json", manifest)

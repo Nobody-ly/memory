@@ -107,6 +107,10 @@ class Exp1MockRunTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             for line in lines:
                 self.assertEqual(set(json.loads(line)["methods"]), set(METHODS))
+            metric_lines = (
+                output / "metric_records.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(metric_lines), 2 * len(METHODS))
             self.assertTrue((output / "summary.json").exists())
             self.assertTrue((output / "run_manifest.json").exists())
 
