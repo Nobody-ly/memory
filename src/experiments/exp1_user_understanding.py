@@ -77,7 +77,7 @@ class Exp1Config:
     min_context_sessions: int = 2
     context_sessions: Optional[int] = 3
     max_context_chars: int = 60000
-    profile_max_tokens: int = 8000
+    profile_max_tokens: int = 16000
     max_eval_points_per_chat: int = 15
     operation_max_attempts: int = 3
     chat_filter: Optional[List[str]] = None
@@ -812,7 +812,7 @@ def main() -> None:
     parser.add_argument("--min-context-sessions", type=int, default=2)
     parser.add_argument("--context-sessions", type=_parse_context_sessions, default=3)
     parser.add_argument("--max-context-chars", type=int, default=60000)
-    parser.add_argument("--profile-max-tokens", type=int, default=8000)
+    parser.add_argument("--profile-max-tokens", type=int, default=16000)
     parser.add_argument("--max-eval-points", type=int, default=15)
     parser.add_argument("--operation-max-attempts", type=int, default=3)
     parser.add_argument("--chats", nargs="*", default=None)
