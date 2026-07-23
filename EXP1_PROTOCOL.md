@@ -1,65 +1,95 @@
 # Exp1 实验协议与运行说明
 
-## 实验问题
+## 任务
 
-在观察到当前用户消息后，比较三种方法对用户当前情绪、情感极性和话题的理解：
+Exp1 在已经看到当前用户消息的前提下，比较三种方法对用户当前状态的理解：
 
-1. `self_model`：使用 agent 自身 persona 推测用户状态。
-2. `flat_profile`：使用因果历史生成的扁平用户画像。
-3. `explicit_model`：使用相同因果历史生成的五层用户画像。
+1. `self_model`：只使用真实对话历史和当前消息。
+2. `flat_profile`：额外使用从训练对话生成的扁平用户画像。
+3. `explicit_model`：额外使用从同一训练对话生成的五层用户画像。
 
-三种方法使用相同目标消息、相同短期对话和相同严格输出 Schema。Exp1 不使用
-Bayesian 更新、current state、memory、RAG 或额外 baseline。
+三种方法使用相同的目标消息、历史、模型和严格输出 Schema。Exp1 不使用
+Bayesian 更新、current state、memory、RAG、typed context block 或新增 baseline。
 
-## 时间线
+## REALTALK 对齐方式
 
-- 测试点位于 session 边界。
-- 已完成 `session_1...session_N` 后，目标是 `session_N+1` 第一段合并后的用户输入。
-- Profile 只从已完成 session 生成，不读取目标 session 或未来 session。
-- 短期上下文默认取最近 3 个已完成 session，并包含目标输入之前的当前 session 消息。
-- 连续的同一说话人 chat bubbles 会先合并。
+- 按论文 Table 8 为每位用户固定一段训练对话 `Ca` 和一段测试对话 `Cb`。
+- `Ca` 和 `Cb` 都按时间取最早 3 个 session。
+- 连续的同说话人消息先合并为一个语义 turn。
+- Flat 与五层画像都只由 `Ca` 的 3 个 session 生成，输入语料完全相同。
+- 画像在整段 `Cb` 测试中固定，不使用 `Cb` 更新；在线更新留给 Exp4。
+- `Cb` 使用消息级滚动测试：每个该用户的合并消息都是一个测试点。
+- 每个目标消息的历史是该 `Cb` 片段中它之前的全部真实合并 turn。
+- 上一个目标消息会进入下一个测试点的历史，当前目标和未来消息不会泄露。
+- Exp1 与论文生成任务唯一必要的区别：论文预测不可见的下一消息，Exp1
+  已看到当前消息并判断它表达的当前状态。
 
-## Ground Truth 和指标
+默认上下文上限是 60,000 字符。超限时只从最旧的完整 turn 开始删除，并记录
+`context_truncated=true`；设为 `0` 可关闭上限。当前 10 位用户的默认 3-session
+数据共 519 个测试点，最大历史约 20,328 字符，均不会触发截断。
 
-- Emotion：固定 revision 的 Cardiff REALTALK emotion classifier。
-- Sentiment：固定 revision 的 Cardiff REALTALK sentiment classifier。
-- Topic：保留 Exp1 原有扩展指标，由同一严格 Schema 生成参考 topic，但不参与主排名。
-- Emotion/Sentiment 使用严格标签相等；Topic 继续使用原来的词项召回重合度。
-- 主指标是 Emotion Accuracy 和 Sentiment Accuracy；辅助报告两者的 Macro-F1。
-- 保存各类别 precision、recall、F1、support、预测数量和完整混淆矩阵。
-- 主结果使用 chat-level macro average，同时保存全局 micro 统计。
-- Topic 单独标为 exploratory metric，不参与主提升量或配对统计。
+## 指标
 
-## 安装与运行
+论文对齐并保留原始值的指标：
+
+- Emotion Accuracy：固定 revision 的 Cardiff emotion classifier 生成参考标签。
+- Sentiment Accuracy：固定 revision 的 Cardiff sentiment classifier 生成参考标签。
+- Reflectiveness Accuracy：按 REALTALK 定义进行严格布尔判断。
+- Grounding Accuracy：按 REALTALK 定义进行严格布尔判断。
+- Intimacy Absolute Difference：固定 revision 的 Cardiff intimacy regressor。
+- Empathy Absolute Difference：EPITOME 三项得分之和的绝对差。
+
+Exp1 还保留 Emotion/Sentiment Macro-F1，便于检查类别不均衡。Topic
+Consistency 是原 Exp1 的扩展指标，只作探索分析，不参与主排名和配对显著性结论。
+ROUGE 与 BERTScore 不适用，因为 Exp1 不生成下一条消息。
+
+结果同时保存：
+
+- `speaker_macro`：先对每位用户计算，再对用户平均，作为论文主表默认聚合。
+- `micro`：把所有目标消息放在一起计算，作为补充。
+- 完整标签、预测、混淆矩阵、EI 原始值与逐样本绝对差，方便离线重算。
+
+## 运行
 
 ```powershell
 uv sync --extra realtalk-eval
 python -m unittest discover -s tests -v
+
 python -m src.experiments.exp1_user_understanding `
-  --chats Chat_1_Emi_Elise `
+  --speakers Emi `
   --max-eval-points 2 `
-  --output-dir data/exp1_smoke_1x2
+  --output-dir data/exp1_realtalk_smoke_emi_2
 ```
 
-完整运行可删除 `--chats`，并将 `--max-eval-points` 调整为所需数量或 `0`。上下文可用
-`--context-sessions 3`、其他正整数或 `all` 调整；`--max-context-chars 0` 表示关闭字符上限。
-画像生成默认允许最多 `16000` 输出 token，可通过 `--profile-max-tokens` 调整；该上限仅防止完整
-JSON 被模型截断，不对已经完整结束的画像做定长裁剪。
+全量运行：
+
+```powershell
+python -m src.experiments.exp1_user_understanding `
+  --profile-sessions 3 `
+  --test-sessions 3 `
+  --max-eval-points 0 `
+  --output-dir data/exp1_realtalk_full
+```
+
+`--max-eval-points` 是每位用户的上限，`0` 表示测试全部合并消息。
+`--profile-max-tokens` 只用于避免画像 JSON 被模型截断，不会对已经完整生成的画像
+做定长裁剪。
 
 ## 输出与恢复
 
-- `results.jsonl`：完整成功 triplet；每个测试点只写一行。
-- `metric_records.jsonl`：逐样本逐方法长表，可离线重算分类指标和后续统计。
-- `summary.json`：三方法 macro/micro 指标、分类明细、提升量、配对结果和诊断信息。
+- `results.jsonl`：每个完整三方法 triplet 一行。
+- `metric_records.jsonl`：逐样本逐方法长表，包含后续统计所需原始值。
+- `summary.json`：macro/micro 指标、分类明细、提升量和配对结果。
 - `run_manifest.json`：commit、源码哈希、模型、Schema、分类器 revision 和配置。
-- `checkpoint.json`：原子调用缓存和恢复状态。
+- `checkpoint.json`：原子调用缓存与恢复状态。
 
-网络失败最多重试 6 次，Schema/解析失败最多重试 3 次。失败测试点不会记 0 分，
-而是记录为 `excluded_incomplete_triplet`；恢复运行只补缺失操作，不重复统计成功结果。
+网络失败由 LLM 客户端最多重试 6 次，逻辑或 Schema 失败最多重试 3 次。失败测试点
+记录为 `excluded_incomplete_triplet`，不会记成 0 分。恢复运行只补失败操作，不重复
+调用和统计成功结果。
 
-已有实验结果可完全离线重算，不产生 API 调用：
+已有结果可离线重算，不产生 API 调用：
 
 ```powershell
 python -m src.experiments.exp1_recompute_metrics `
-  data/exp1_continuous_final_1x5/results.jsonl
+  data/exp1_realtalk_full/results.jsonl
 ```
