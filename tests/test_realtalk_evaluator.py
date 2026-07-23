@@ -8,13 +8,16 @@ class RealTalkEvaluatorTests(unittest.TestCase):
         def factory(_task, model, tokenizer, revision):
             self.assertEqual(model, tokenizer)
             self.assertTrue(revision)
-            label = "Joy" if "emotion" in model else "Positive"
-            return lambda _text: [{"label": label, "score": 0.9}]
+            if "emotion" in model:
+                return lambda _text: [{"label": "Joy", "score": 0.9}]
+            if "sentiment" in model:
+                return lambda _text: [{"label": "Positive", "score": 0.9}]
+            return lambda _text: [{"label": "LABEL_0", "score": 0.75}]
 
         evaluator = RealTalkLabelEvaluator(factory)
         self.assertEqual(
             evaluator.annotate("A lovely day"),
-            {"emotion": "joy", "sentiment": "positive"},
+            {"emotion": "joy", "sentiment": "positive", "intimacy": 0.75},
         )
 
     def test_rejects_out_of_taxonomy_emotion(self):

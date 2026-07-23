@@ -5,27 +5,40 @@ from src.experiments.exp1_metrics import (
     paired_correctness_counts,
 )
 from src.experiments.exp1_schema import EMOTION_LABELS
-from src.experiments.exp1_user_understanding import aggregate_results
+from src.experiments.exp1_user_understanding import (
+    aggregate_results,
+    score_prediction,
+)
+
+
+def _state(emotion, sentiment, topic, **overrides):
+    value = {
+        "emotion": emotion,
+        "sentiment": sentiment,
+        "topic": topic,
+        "reflective": True,
+        "grounding": False,
+        "intimacy": 0.5,
+        "empathy": {
+            "emotional_reaction": 1,
+            "interpretation": 1,
+            "exploration": 0,
+        },
+    }
+    value.update(overrides)
+    return value
 
 
 def _method(prediction, reference):
     return {
         "prediction": prediction,
-        "scores": {
-            "emotion_accuracy": float(
-                prediction["emotion"] == reference["emotion"]
-            ),
-            "sentiment_accuracy": float(
-                prediction["sentiment"] == reference["sentiment"]
-            ),
-            "topic_consistency": 0.25,
-        },
+        "scores": score_prediction(prediction, reference),
     }
 
 
 def _result(
     result_id,
-    chat_file,
+    speaker,
     reference,
     self_prediction,
     flat_prediction,
@@ -33,11 +46,14 @@ def _result(
 ):
     return {
         "result_id": result_id,
-        "chat_file": chat_file,
+        "speaker": speaker,
+        "train_chat_file": f"Train_{speaker}.json",
+        "test_chat_file": f"Test_{speaker}.json",
+        "chat_file": f"Test_{speaker}.json",
         "eval_id": result_id,
-        "boundary_index": 2,
-        "target_session": "session_3",
-        "user_speaker": "User",
+        "message_level_index": 0,
+        "target_session": "session_1",
+        "user_speaker": speaker,
         "target_dia_ids": [result_id],
         "reference": reference,
         "methods": {
@@ -65,29 +81,33 @@ class Exp1MetricsTests(unittest.TestCase):
             len(report["confusion_matrix"]["matrix"]), len(EMOTION_LABELS)
         )
 
-    def test_aggregate_demotes_topic_and_preserves_recomputable_details(self):
-        first_reference = {
-            "emotion": "joy", "sentiment": "positive", "topic": "work"
-        }
-        second_reference = {
-            "emotion": "sadness", "sentiment": "negative", "topic": "family"
-        }
+    def test_aggregate_demotes_topic_and_preserves_paper_aligned_metrics(self):
+        first_reference = _state("joy", "positive", "work")
+        second_reference = _state(
+            "sadness", "negative", "family", reflective=False, grounding=True
+        )
         results = [
             _result(
                 "sample-1",
-                "Chat_1.json",
+                "Emi",
                 first_reference,
-                {"emotion": "sadness", "sentiment": "negative", "topic": "job"},
-                {"emotion": "joy", "sentiment": "positive", "topic": "job"},
-                {"emotion": "joy", "sentiment": "positive", "topic": "job"},
+                _state("sadness", "negative", "job"),
+                _state("joy", "positive", "job"),
+                _state("joy", "positive", "job"),
             ),
             _result(
                 "sample-2",
-                "Chat_2.json",
+                "Nicolas",
                 second_reference,
-                {"emotion": "sadness", "sentiment": "negative", "topic": "home"},
-                {"emotion": "joy", "sentiment": "positive", "topic": "home"},
-                {"emotion": "sadness", "sentiment": "neutral", "topic": "home"},
+                _state(
+                    "sadness", "negative", "home",
+                    reflective=False, grounding=True,
+                ),
+                _state("joy", "positive", "home"),
+                _state(
+                    "sadness", "neutral", "home",
+                    reflective=False, grounding=True, intimacy=0.3,
+                ),
             ),
         ]
 
@@ -102,14 +122,17 @@ class Exp1MetricsTests(unittest.TestCase):
         )
         self.assertNotIn(
             "explicit_vs_self_model_topic_consistency",
-            summary["improvement_chat_macro"],
+            summary["improvement_speaker_macro"],
         )
         self.assertIn(
             "explicit_vs_self_model_topic_consistency",
-            summary["extended_improvement_chat_macro"],
+            summary["extended_improvement_speaker_macro"],
         )
         self.assertEqual(explicit["micro"]["emotion_accuracy"], 1.0)
-        self.assertEqual(explicit["chat_macro"]["sentiment_macro_f1"], 0.5)
+        self.assertEqual(explicit["speaker_macro"]["sentiment_macro_f1"], 0.5)
+        self.assertEqual(explicit["micro"]["reflectiveness_accuracy"], 1.0)
+        self.assertEqual(explicit["micro"]["grounding_accuracy"], 1.0)
+        self.assertEqual(explicit["micro"]["intimacy_absolute_difference"], 0.1)
         self.assertIn(
             "confusion_matrix",
             explicit["classification_details"]["emotion"]["global"],
