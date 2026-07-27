@@ -274,9 +274,7 @@ def run_exp2(
                 if not config.continue_on_error:
                     raise
 
-    results = sorted(
-        checkpoint.result_values(), key=lambda item: item["result_id"]
-    )
+    results = sorted(checkpoint.result_values(), key=_result_sort_key)
     summary = aggregate_results(results)
     summary.update({
         "elapsed_seconds": round(perf_counter() - started, 3),
@@ -835,6 +833,14 @@ def _atomic_text(path: Path, value: str) -> None:
 
 def _speaker_id(speaker: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", speaker.casefold()).strip("_")
+
+
+def _result_sort_key(item: Dict[str, Any]) -> tuple[str, str, int]:
+    return (
+        item["test_chat_file"],
+        item["speaker"].casefold(),
+        int(item["message_level_index"]),
+    )
 
 
 def _mean(values: Iterable[float]) -> float:
