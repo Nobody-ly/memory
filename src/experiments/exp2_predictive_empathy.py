@@ -497,23 +497,29 @@ def _cached_prediction(
     current_state: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     method_history = [] if method == "llm_only" else context_turns
+    effective_state = current_state or None
+    effective_method = method
+    if method == "dialogue_history" and not method_history:
+        effective_method = "llm_only"
+    elif method == "full_framework" and not effective_state:
+        effective_method = "user_profile"
     input_hash = stable_hash({
-        "method": method,
+        "effective_method": effective_method,
         "latest_observed_message": latest_observed_message,
         "history": method_history,
         "profile": profile,
-        "current_state": current_state,
+        "current_state": effective_state,
         "system": PREDICTION_SYSTEM_PROMPT,
         "schema": FUTURE_STATE_RESPONSE_SCHEMA,
     })
-    key = f"prediction:{result_id}:{method}:{input_hash}"
+    key = f"prediction:{result_id}:{effective_method}:{input_hash}"
     return checkpoint.execute(
         key,
         lambda: predictor.predict(
             user_message=latest_observed_message,
             conversation_history=method_history,
             user_profile=profile,
-            current_state=current_state,
+            current_state=effective_state,
         ),
         normalize_future_state,
         max_attempts=config.operation_max_attempts,

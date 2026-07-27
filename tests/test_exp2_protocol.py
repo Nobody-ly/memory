@@ -81,14 +81,14 @@ def _chat(first_speaker, second_speaker, prefix):
     for index in range(1, 4):
         chat[f"session_{index}"] = [
             {
-                "speaker": second_speaker,
-                "clean_text": f"{prefix} partner {index}",
-                "dia_id": f"{prefix}-p{index}",
-            },
-            {
                 "speaker": first_speaker,
                 "clean_text": f"{prefix} work update {index}",
                 "dia_id": f"{prefix}-u{index}",
+            },
+            {
+                "speaker": second_speaker,
+                "clean_text": f"{prefix} partner {index}",
+                "dia_id": f"{prefix}-p{index}",
             },
         ]
     return chat
@@ -130,7 +130,7 @@ class Exp2ProtocolTests(unittest.TestCase):
             self.assertEqual(summary["num_eval_points"], 2)
             self.assertEqual(summary["num_speakers"], 1)
             self.assertEqual(set(summary["comparison"]), set(METHODS))
-            self.assertEqual(call_count, 12)
+            self.assertEqual(call_count, 10)
             self.assertEqual(len(llm.calls), call_count)
             self.assertEqual(resumed["num_eval_points"], 2)
 
@@ -140,32 +140,32 @@ class Exp2ProtocolTests(unittest.TestCase):
                 if (kwargs.get("response_schema") or {}).get("name")
                 == "exp2_future_user_state"
             ]
-            self.assertEqual(len(future_prompts), 2 * len(METHODS))
+            self.assertEqual(len(future_prompts), 6)
             future_calls = [
                 kwargs
                 for _, _, kwargs in llm.calls
                 if (kwargs.get("response_schema") or {}).get("name")
                 == "exp2_future_user_state"
             ]
-            self.assertTrue(all(call["max_tokens"] == 2048 for call in future_calls))
-            self.assertEqual(future_prompts[2], future_prompts[3])
+            self.assertTrue(all(call["max_tokens"] == 4096 for call in future_calls))
             self.assertTrue(all(
                 "test work update 1" not in prompt
-                for prompt in future_prompts[:4]
+                for prompt in future_prompts[:2]
             ))
             self.assertTrue(all(
                 "test work update 2" not in prompt
-                for prompt in future_prompts[4:]
+                for prompt in future_prompts[2:]
             ))
             self.assertNotIn("CONVERSATION HISTORY", future_prompts[0])
-            self.assertIn("CONVERSATION HISTORY", future_prompts[5])
-            self.assertIn('"core"', future_prompts[2])
-            self.assertIn('"core"', future_prompts[3])
+            self.assertIn("CONVERSATION HISTORY", future_prompts[3])
+            self.assertIn('"core"', future_prompts[1])
+            self.assertIn('"core"', future_prompts[4])
+            self.assertIn('"core"', future_prompts[5])
             self.assertNotIn(
-                "CURRENT STATE DERIVED FROM OBSERVED HISTORY", future_prompts[2]
+                "CURRENT STATE DERIVED FROM OBSERVED HISTORY", future_prompts[4]
             )
             self.assertIn(
-                "CURRENT STATE DERIVED FROM OBSERVED HISTORY", future_prompts[7]
+                "CURRENT STATE DERIVED FROM OBSERVED HISTORY", future_prompts[5]
             )
 
             results = [
@@ -178,6 +178,14 @@ class Exp2ProtocolTests(unittest.TestCase):
             self.assertTrue(all(
                 set(item["methods"]) == set(METHODS) for item in results
             ))
+            self.assertEqual(
+                results[0]["methods"]["llm_only"]["prediction"],
+                results[0]["methods"]["dialogue_history"]["prediction"],
+            )
+            self.assertEqual(
+                results[0]["methods"]["user_profile"]["prediction"],
+                results[0]["methods"]["full_framework"]["prediction"],
+            )
             self.assertTrue(all(
                 item["context"]["target_visible_to_predictors"] is False
                 for item in results
