@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from src.experiments.exp2_predictive_empathy import (
@@ -188,6 +189,13 @@ class Exp2ProtocolTests(unittest.TestCase):
                 ),
                 2 * len(METHODS),
             )
+
+            expanded = run_exp2(
+                replace(config, max_eval_points_per_speaker=3),
+                llm=llm,
+            )
+            self.assertEqual(expanded["num_eval_points"], 3)
+            self.assertEqual(len(llm.calls), call_count + 6)
 
 
 if __name__ == "__main__":

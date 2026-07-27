@@ -745,7 +745,12 @@ def _run_signature(
     splits: List[Dict[str, str]],
 ) -> str:
     signature_config = asdict(config)
-    for key in ("output_dir", "continue_on_error", "fresh"):
+    for key in (
+        "output_dir",
+        "continue_on_error",
+        "fresh",
+        "max_eval_points_per_speaker",
+    ):
         signature_config.pop(key, None)
     source_files = [
         Path(__file__),
