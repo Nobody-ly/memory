@@ -128,6 +128,11 @@ def compute_response_scores(
     candidate_ei: Dict[str, Any],
     bertscore_f1: Optional[float] = None,
 ) -> Dict[str, Any]:
+    empathy_fields = ("emotional_reaction", "interpretation", "exploration")
+    component_differences = [
+        abs(candidate_ei["empathy"][field] - reference_ei["empathy"][field])
+        for field in empathy_fields
+    ]
     scores = {
         **compute_style_similarity(reference_text, candidate_text),
         "reflectiveness_accuracy": float(
@@ -150,6 +155,12 @@ def compute_response_scores(
                 _empathy_total(candidate_ei["empathy"])
                 - _empathy_total(reference_ei["empathy"])
             )
+        ),
+        "empathy_component_mae": round(
+            sum(component_differences) / len(component_differences), 4
+        ),
+        "empathy_vector_accuracy": float(
+            all(difference == 0 for difference in component_differences)
         ),
         "candidate_epitome_total": float(_empathy_total(candidate_ei["empathy"])),
         "reference_epitome_total": float(_empathy_total(reference_ei["empathy"])),

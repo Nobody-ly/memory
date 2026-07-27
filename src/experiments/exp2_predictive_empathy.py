@@ -51,7 +51,10 @@ from .exp1_schema import (
     normalize_reference_judgment,
 )
 from .exp1_user_understanding import REFERENCE_JUDGE_SYSTEM_PROMPT
-from .empathy_alignment_analysis import EmpathyAlignmentReasoner
+from .empathy_alignment_analysis import (
+    EMPATHY_ALIGNMENT_MAX_TOKENS,
+    EmpathyAlignmentReasoner,
+)
 from .exp2_framework import (
     FRAMEWORK_STATE_MAX_TOKENS,
     FrameworkStateReasoner,
@@ -100,10 +103,12 @@ RESPONSE_HIGHER_IS_BETTER = (
     "grounding_accuracy",
     "sentiment_accuracy",
     "emotion_accuracy",
+    "empathy_vector_accuracy",
 )
 RESPONSE_LOWER_IS_BETTER = (
     "intimacy_absolute_difference",
     "empathy_absolute_difference",
+    "empathy_component_mae",
 )
 
 
@@ -497,6 +502,7 @@ def run_exp2(
         },
         "future_state_max_tokens": FUTURE_STATE_MAX_TOKENS,
         "framework_state_max_tokens": FRAMEWORK_STATE_MAX_TOKENS,
+        "empathy_alignment_max_tokens": EMPATHY_ALIGNMENT_MAX_TOKENS,
         "response_max_tokens": RESPONSE_MAX_TOKENS,
         "label_evaluator": label_evaluator.metadata(),
         "bertscore": {
@@ -1210,6 +1216,8 @@ def _metric_protocol() -> Dict[str, Any]:
             "emotion_accuracy",
             "intimacy_absolute_difference",
             "empathy_absolute_difference",
+            "empathy_component_mae",
+            "empathy_vector_accuracy",
         ],
         "primary_ranking_aggregation": "speaker_macro",
         "categorical_policy": "strict label equality; no semantic-match credit",

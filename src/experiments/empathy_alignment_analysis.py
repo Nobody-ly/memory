@@ -39,6 +39,8 @@ from .persona_simulation import (
     condense_persona,
 )
 
+EMPATHY_ALIGNMENT_MAX_TOKENS = 2400
+
 
 # ---------------------------------------------------------------------------
 # Robust JSON parsing
@@ -228,7 +230,7 @@ class EmpathyAlignmentReasoner:
                 EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
                 user_prompt,
                 temperature=0.3,
-                max_tokens=1200,
+                max_tokens=EMPATHY_ALIGNMENT_MAX_TOKENS,
             ))
             self.epistemic_tracker.increment()
             return result

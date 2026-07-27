@@ -80,6 +80,8 @@ Emotion、Sentiment、Intimacy 的真实标签使用 REALTALK 对应的固定 Ca
 - Emotion Accuracy
 - Intimacy Absolute Difference，越低越好
 - Empathy / EPITOME Absolute Difference，越低越好
+- EPITOME Component MAE，分别比较 ER / IN / EX 后取平均，越低越好
+- EPITOME Vector Accuracy，三个分项完全一致才算正确
 
 同时保存真实回复和生成回复各自的 EPITOME 总分，便于展示与后续重新聚合；总分本身不直接作为“越高越好”的主排名，因为普通寒暄中过强共情并不一定更合适。
 
