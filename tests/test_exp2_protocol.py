@@ -7,6 +7,7 @@ from pathlib import Path
 from src.experiments.exp2_predictive_empathy import (
     Exp2Config,
     METHODS,
+    _result_sort_key,
     run_exp2,
 )
 from src.experiments.exp2_schema import normalize_future_state
@@ -95,6 +96,22 @@ def _chat(first_speaker, second_speaker, prefix):
 
 
 class Exp2ProtocolTests(unittest.TestCase):
+    def test_result_sort_key_uses_numeric_message_order(self):
+        results = [
+            {
+                "test_chat_file": "Chat_1.json",
+                "speaker": "Emi",
+                "message_level_index": index,
+            }
+            for index in (10, 2, 1)
+        ]
+        self.assertEqual(
+            [item["message_level_index"] for item in sorted(
+                results, key=_result_sort_key
+            )],
+            [1, 2, 10],
+        )
+
     def test_schema_normalization_is_strict_and_idempotent(self):
         normalized = normalize_future_state(_future_state())
         self.assertEqual(normalized["emotion"], "joy")
