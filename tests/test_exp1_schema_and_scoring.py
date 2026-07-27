@@ -1,7 +1,10 @@
 import unittest
 
 from src.experiments.exp1_schema import EMOTION_LABELS, normalize_state
-from src.experiments.exp1_user_understanding import score_prediction
+from src.experiments.exp1_user_understanding import (
+    REFERENCE_JUDGE_SYSTEM_PROMPT,
+    score_prediction,
+)
 
 
 def _state(**overrides):
@@ -23,6 +26,11 @@ def _state(**overrides):
 
 
 class Exp1SchemaAndScoringTests(unittest.TestCase):
+    def test_reference_judge_has_content_level_intimacy_anchors(self):
+        self.assertIn("routine greetings", REFERENCE_JUDGE_SYSTEM_PROMPT)
+        self.assertIn("deeply intimate", REFERENCE_JUDGE_SYSTEM_PROMPT)
+        self.assertIn("do not infer intimacy", REFERENCE_JUDGE_SYSTEM_PROMPT)
+
     def test_schema_uses_realtalk_emotion_labels(self):
         self.assertEqual(
             set(EMOTION_LABELS),

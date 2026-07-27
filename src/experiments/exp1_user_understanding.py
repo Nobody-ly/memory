@@ -71,6 +71,7 @@ REFERENCE_JUDGE_SYSTEM_PROMPT = """You label one observed dialogue message using
 Reflective is true only when the speaker explicitly shows self-observation, perspective-taking, or explains the motivation behind their own thoughts, feelings, or actions.
 Grounding is true when the message actively builds mutual understanding through a clarification, follow-up inquiry, confirmation check, or request to expand shared information.
 Empathy uses EPITOME: emotional_reaction, interpretation, and exploration are each integer scores from 0 (absent) to 2 (explicit and specific).
+Intimacy measures personal disclosure and relational closeness expressed in the current message itself; do not infer intimacy only because the speakers have a long relationship. Use 0.0 for routine greetings, logistics, or impersonal facts; about 0.25 for friendly but surface-level engagement; about 0.5 for meaningful personal experiences, preferences, or feelings; about 0.75 for vulnerable disclosure, private concerns, or strong relational trust; and 1.0 only for deeply intimate, highly vulnerable content. Intermediate values are allowed.
 Topic is a concise description of the main subject of the observed message."""
 
 STATE_SYSTEM_PROMPTS = {
