@@ -11,6 +11,9 @@ from .experiments.exp2_schema import (
 from .llm_client import LLMClient
 
 
+FUTURE_STATE_MAX_TOKENS = 2048
+
+
 # The core task wording is retained from the original Experiment 2.
 PREDICTION_SYSTEM_PROMPT = """You predict the user's next conversational state.
 
@@ -117,7 +120,7 @@ class FutureStatePredictor:
             PREDICTION_SYSTEM_PROMPT,
             user_prompt,
             temperature=0.0,
-            max_tokens=1200,
+            max_tokens=FUTURE_STATE_MAX_TOKENS,
             response_schema=FUTURE_STATE_RESPONSE_SCHEMA,
         )
         try:
