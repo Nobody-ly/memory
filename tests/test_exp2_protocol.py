@@ -141,6 +141,13 @@ class Exp2ProtocolTests(unittest.TestCase):
                 == "exp2_future_user_state"
             ]
             self.assertEqual(len(future_prompts), 2 * len(METHODS))
+            future_calls = [
+                kwargs
+                for _, _, kwargs in llm.calls
+                if (kwargs.get("response_schema") or {}).get("name")
+                == "exp2_future_user_state"
+            ]
+            self.assertTrue(all(call["max_tokens"] == 2048 for call in future_calls))
             self.assertEqual(future_prompts[2], future_prompts[3])
             self.assertTrue(all(
                 "test work update 1" not in prompt

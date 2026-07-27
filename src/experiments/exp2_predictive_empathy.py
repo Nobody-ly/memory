@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from ..llm_client import LLMClient
 from ..prediction import (
+    FUTURE_STATE_MAX_TOKENS,
     PREDICTION_SYSTEM_PROMPT,
     FutureStatePredictor,
     compute_prediction_error,
@@ -325,6 +326,7 @@ def run_exp2(
             "future_state": FUTURE_STATE_RESPONSE_SCHEMA,
             "reference_judgment": REFERENCE_JUDGMENT_SCHEMA,
         },
+        "future_state_max_tokens": FUTURE_STATE_MAX_TOKENS,
         "metric_protocol": _metric_protocol(),
         "network_retry_max_attempts": getattr(llm, "max_retries", None),
         "operation_retry_max_attempts": config.operation_max_attempts,
