@@ -26,7 +26,14 @@ FUTURE_STATE_RESPONSE_SCHEMA: Dict[str, Any] = {
                 "type": "number",
                 "minimum": 0,
                 "maximum": 1,
-                "description": "Expected interpersonal intimacy from 0 to 1.",
+                "description": (
+                    "Expected content-level intimacy: 0 routine greeting, "
+                    "logistics, or impersonal facts; about 0.25 friendly "
+                    "surface engagement; about 0.5 meaningful personal "
+                    "experience or feelings; about 0.75 vulnerable/private "
+                    "disclosure or strong trust; 1 only deeply intimate and "
+                    "highly vulnerable content."
+                ),
             },
             "future_topic": {
                 "type": "string",

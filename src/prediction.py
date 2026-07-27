@@ -11,7 +11,7 @@ from .experiments.exp2_schema import (
 from .llm_client import LLMClient
 
 
-FUTURE_STATE_MAX_TOKENS = 2048
+FUTURE_STATE_MAX_TOKENS = 4096
 
 
 # The core task wording is retained from the original Experiment 2.
