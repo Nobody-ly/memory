@@ -1,4 +1,4 @@
-"""Strict structured-output contract for Experiment 2 future-state prediction."""
+"""Strict structured-output contracts for Experiment 2."""
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -41,93 +41,123 @@ FUTURE_STATE_RESPONSE_SCHEMA: Dict[str, Any] = {
                 "maxLength": 160,
                 "description": "Concise expected subject of the next user message.",
             },
-            "future_reflective": {
-                "type": "boolean",
-                "description": "Whether the next user message is expected to be reflective.",
-            },
-            "future_grounding": {
-                "type": "boolean",
-                "description": "Whether the next user message is expected to use a grounding act.",
-            },
-            "future_empathy": {
-                "type": "object",
-                "properties": {
-                    "emotional_reaction": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 2,
-                    },
-                    "interpretation": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 2,
-                    },
-                    "exploration": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 2,
-                    },
-                },
-                "required": [
-                    "emotional_reaction",
-                    "interpretation",
-                    "exploration",
-                ],
-                "additionalProperties": False,
-            },
-            "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "description": "Confidence in the complete future-state prediction.",
-            },
         },
         "required": [
             "future_emotion",
             "future_sentiment",
             "future_intimacy",
             "future_topic",
-            "future_reflective",
-            "future_grounding",
-            "future_empathy",
-            "confidence",
         ],
         "additionalProperties": False,
     },
 }
 
 
+FRAMEWORK_STATE_RESPONSE_SCHEMA: Dict[str, Any] = {
+    "name": "exp2_framework_state",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "current_state": {
+                "type": "object",
+                "properties": {
+                    "emotion": {"type": "string"},
+                    "stress_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "motivation": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "energy": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "main_need": {"type": "string"},
+                    "state_summary": {"type": "string"},
+                },
+                "required": [
+                    "emotion",
+                    "stress_level",
+                    "motivation",
+                    "energy",
+                    "main_need",
+                    "state_summary",
+                ],
+                "additionalProperties": False,
+            },
+            "projected_state": {
+                "type": "object",
+                "properties": {
+                    "next_emotion_trend": {"type": "string"},
+                    "possible_behavior": {"type": "string"},
+                    "risk": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "recommended_intervention": {"type": "string"},
+                },
+                "required": [
+                    "next_emotion_trend",
+                    "possible_behavior",
+                    "risk",
+                    "recommended_intervention",
+                ],
+                "additionalProperties": False,
+            },
+            "activated_persona": {
+                "type": "object",
+                "properties": {
+                    "empathy_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "teasing_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "warmth_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "guidance_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "activated_tone": {"type": "string"},
+                },
+                "required": [
+                    "empathy_level",
+                    "teasing_level",
+                    "warmth_level",
+                    "guidance_level",
+                    "activated_tone",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["current_state", "projected_state", "activated_persona"],
+        "additionalProperties": False,
+    },
+}
+
+
 def normalize_future_state(value: Any) -> Dict[str, Any]:
-    canonical = {
-        "emotion",
-        "sentiment",
-        "intimacy",
-        "topic",
-        "reflective",
-        "grounding",
-        "empathy",
-        "confidence",
-    }
+    canonical = {"emotion", "sentiment", "intimacy", "topic"}
     if isinstance(value, dict) and set(value) == canonical:
         value = {
             "future_emotion": value["emotion"],
             "future_sentiment": value["sentiment"],
             "future_intimacy": value["intimacy"],
             "future_topic": value["topic"],
-            "future_reflective": value["reflective"],
-            "future_grounding": value["grounding"],
-            "future_empathy": value["empathy"],
-            "confidence": value["confidence"],
         }
     required = {
         "future_emotion",
         "future_sentiment",
         "future_intimacy",
         "future_topic",
-        "future_reflective",
-        "future_grounding",
-        "future_empathy",
-        "confidence",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError(
@@ -144,34 +174,31 @@ def normalize_future_state(value: Any) -> Dict[str, Any]:
     if not topic:
         raise ValueError("future topic must not be empty")
 
-    reflective = value["future_reflective"]
-    grounding = value["future_grounding"]
-    if not isinstance(reflective, bool) or not isinstance(grounding, bool):
-        raise ValueError("future reflective and grounding must be booleans")
-
-    intimacy = _bounded_number(value["future_intimacy"], "future intimacy")
-    confidence = _bounded_number(value["confidence"], "confidence")
-    empathy = value["future_empathy"]
-    empathy_fields = {"emotional_reaction", "interpretation", "exploration"}
-    if not isinstance(empathy, dict) or set(empathy) != empathy_fields:
-        raise ValueError("future empathy must contain all EPITOME components")
-    normalized_empathy: Dict[str, int] = {}
-    for field in empathy_fields:
-        score = empathy[field]
-        if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 2:
-            raise ValueError(f"future empathy {field} must be an integer in [0, 2]")
-        normalized_empathy[field] = score
-
     return {
         "emotion": emotion,
         "sentiment": sentiment,
-        "intimacy": intimacy,
+        "intimacy": _bounded_number(value["future_intimacy"], "future intimacy"),
         "topic": topic,
-        "reflective": reflective,
-        "grounding": grounding,
-        "empathy": normalized_empathy,
-        "confidence": confidence,
     }
+
+
+def normalize_framework_state(value: Any) -> Dict[str, Any]:
+    required = {"current_state", "projected_state", "activated_persona"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError(
+            f"framework state must contain exactly {sorted(required)}"
+        )
+    schema = FRAMEWORK_STATE_RESPONSE_SCHEMA["schema"]["properties"]
+    normalized: Dict[str, Any] = {}
+    for block in required:
+        content = value[block]
+        expected = set(schema[block]["required"])
+        if not isinstance(content, dict) or set(content) != expected:
+            raise ValueError(
+                f"{block} must contain exactly {sorted(expected)}"
+            )
+        normalized[block] = dict(content)
+    return normalized
 
 
 def _bounded_number(value: Any, label: str) -> float:

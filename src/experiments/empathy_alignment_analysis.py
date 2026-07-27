@@ -206,7 +206,11 @@ class EmpathyAlignmentReasoner:
         state_text = json.dumps(current_state or {}, ensure_ascii=False)
 
         # Compute omega(t) based on profile maturity and interaction count
-        static_profile = profile.get("state_axis", {}).get("static_profile", {})
+        state_axis = profile.get("state_axis")
+        if isinstance(state_axis, dict):
+            static_profile = state_axis.get("static_profile", {})
+        else:
+            static_profile = profile
         omega = self.epistemic_tracker.compute(static_profile)
         omega_label = get_exploration_label(omega)
 

@@ -21,9 +21,15 @@ Given the dialogue (and optionally a user profile), infer the most likely state 
 
 Requirements:
 - Predict exactly one emotion.
+- Intimacy means the disclosure level expressed in the next message itself,
+  not general relationship closeness or how much is known in the profile.
 """
 
 _CONTEXT_BLOCKS = {
+    "recent_exchange": """MOST RECENT OBSERVED EXCHANGE:
+{recent_exchange}
+
+""",
     "history": """CONVERSATION HISTORY ({n_turns} observed turns):
 {conversation_history}
 
@@ -38,13 +44,10 @@ _CONTEXT_BLOCKS = {
 """,
 }
 
-_OUTPUT_INSTRUCTION = """USER'S LATEST OBSERVED MESSAGE:
-"{user_message}"
-
-Predict the user's state in their next message."""
+_OUTPUT_INSTRUCTION = """Predict the user's state in their next message."""
 
 _MODE_BLOCKS = {
-    "llm_only": [],
+    "llm_only": ["recent_exchange"],
     "dialogue_history": ["history"],
     "user_profile": ["history", "profile"],
     "full_framework": ["history", "profile", "state"],
@@ -54,7 +57,7 @@ _VALID_MODES = set(_MODE_BLOCKS)
 
 def build_user_prompt(
     mode: str,
-    user_message: str,
+    recent_exchange: str = "",
     conversation_history: str = "",
     n_turns: int = 0,
     user_profile: str = "",
@@ -63,18 +66,21 @@ def build_user_prompt(
     """Assemble the original four conditions without mode-specific hints."""
     parts = []
     for block_name in _MODE_BLOCKS[mode]:
+        if block_name == "recent_exchange" and not recent_exchange:
+            continue
         if block_name == "history" and not conversation_history:
             continue
         if block_name == "state" and not current_state:
             continue
         template = _CONTEXT_BLOCKS[block_name]
         parts.append(template.format(
+            recent_exchange=recent_exchange,
             conversation_history=conversation_history,
             n_turns=n_turns,
             user_profile=user_profile,
             current_state=current_state,
         ))
-    parts.append(_OUTPUT_INSTRUCTION.format(user_message=user_message))
+    parts.append(_OUTPUT_INSTRUCTION)
     return "".join(parts)
 
 
@@ -91,12 +97,16 @@ class FutureStatePredictor:
 
     def predict(
         self,
-        user_message: str,
+        recent_exchange: Optional[List[Dict[str, Any]]] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         user_profile: Optional[Dict[str, Any]] = None,
         current_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         history = conversation_history or []
+        recent = recent_exchange or []
+        recent_text = "\n".join(
+            f"{turn['speaker']}: {turn['content']}" for turn in recent
+        )
         history_text = "\n".join(
             f"{turn['speaker']}: {turn['content']}" for turn in history
         )
@@ -110,7 +120,7 @@ class FutureStatePredictor:
         )
         user_prompt = build_user_prompt(
             mode=self.mode,
-            user_message=user_message,
+            recent_exchange=recent_text,
             conversation_history=history_text,
             n_turns=len(history),
             user_profile=profile_text,
@@ -156,23 +166,4 @@ def compute_prediction_error(
             4,
         ),
         "topic_consistency": round(topic_overlap, 4),
-        "reflectiveness_accuracy": float(
-            prediction.get("reflective") == ground_truth.get("reflective")
-        ),
-        "grounding_accuracy": float(
-            prediction.get("grounding") == ground_truth.get("grounding")
-        ),
-        "empathy_absolute_difference": float(
-            abs(
-                _empathy_total(prediction.get("empathy", {}))
-                - _empathy_total(ground_truth.get("empathy", {}))
-            )
-        ),
     }
-
-
-def _empathy_total(value: Dict[str, Any]) -> int:
-    return sum(
-        int(value.get(field, 0))
-        for field in ("emotional_reaction", "interpretation", "exploration")
-    )

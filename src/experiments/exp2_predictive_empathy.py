@@ -21,12 +21,20 @@ from ..prediction import (
     compute_prediction_error,
 )
 from ..prompts.templates_en import (
+    BACKGROUND_REASONING_SYSTEM_PROMPT,
+    BACKGROUND_REASONING_USER_PROMPT_TEMPLATE,
+    DDIRECT_RESPONSE_SYSTEM_PROMPT,
+    EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
+    EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE,
+    PERSONA_EXTRACTION_SYSTEM_PROMPT,
+    PERSONA_EXTRACTION_USER_PROMPT_TEMPLATE,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
 )
 from ..utils import load_json
 from .exp1_metrics import classification_report, speaker_macro_report
 from .exp1_protocol import (
+    REALTALK_PERSONA_SPLITS,
     build_message_level_points,
     build_profile_corpus,
     canonical_speaker,
@@ -43,9 +51,29 @@ from .exp1_schema import (
     normalize_reference_judgment,
 )
 from .exp1_user_understanding import REFERENCE_JUDGE_SYSTEM_PROMPT
-from .exp2_schema import FUTURE_STATE_RESPONSE_SCHEMA, normalize_future_state
+from .empathy_alignment_analysis import EmpathyAlignmentReasoner
+from .exp2_framework import (
+    FRAMEWORK_STATE_MAX_TOKENS,
+    FrameworkStateReasoner,
+    latest_complete_exchange,
+)
+from .exp2_generation import (
+    BERTSCORE_MODEL,
+    BERTSCORE_NUM_LAYERS,
+    RESPONSE_MAX_TOKENS,
+    Exp2ResponseGenerator,
+    add_batched_bertscore,
+    compute_response_scores,
+)
+from .exp2_schema import (
+    FRAMEWORK_STATE_RESPONSE_SCHEMA,
+    FUTURE_STATE_RESPONSE_SCHEMA,
+    normalize_framework_state,
+    normalize_future_state,
+)
 from .experiment_utils import robust_parse_json
 from .operation_checkpoint import OperationCheckpoint
+from .realtalk_evaluator import RealTalkLabelEvaluator
 from .result_provenance import build_run_manifest
 
 
@@ -59,14 +87,24 @@ PROFILE_LAYERS = ("core", "regulation", "cognition", "identity", "behavior")
 HIGHER_IS_BETTER = (
     "emotion_accuracy",
     "sentiment_accuracy",
-    "reflectiveness_accuracy",
-    "grounding_accuracy",
 )
 LOWER_IS_BETTER = (
     "intimacy_absolute_difference",
-    "empathy_absolute_difference",
 )
 EXTENDED_METRICS = ("topic_consistency",)
+RESPONSE_HIGHER_IS_BETTER = (
+    "style_similarity",
+    "rouge_l",
+    "lexical_overlap",
+    "reflectiveness_accuracy",
+    "grounding_accuracy",
+    "sentiment_accuracy",
+    "emotion_accuracy",
+)
+RESPONSE_LOWER_IS_BETTER = (
+    "intimacy_absolute_difference",
+    "empathy_absolute_difference",
+)
 
 
 @dataclass
@@ -82,20 +120,24 @@ class Exp2Config:
     chat_filter: Optional[List[str]] = None
     speaker_filter: Optional[List[str]] = None
     continue_on_error: bool = True
+    run_generation: bool = True
+    compute_bertscore: bool = False
     fresh: bool = False
 
 
 def run_exp2(
     config: Exp2Config,
     llm: Optional[LLMClient] = None,
+    label_evaluator: Optional[RealTalkLabelEvaluator] = None,
 ) -> Dict[str, Any]:
-    """Run the REALTALK-aligned future-state prediction stage of Exp2."""
+    """Run causal prediction and response generation for Experiment 2."""
     splits = select_realtalk_splits(
         config.dataset_dir, config.chat_filter, config.speaker_filter
     )
     if not splits:
         raise ValueError("no REALTALK speaker splits matched the configuration")
     llm = llm or LLMClient()
+    label_evaluator = label_evaluator or RealTalkLabelEvaluator()
     output_dir = Path(config.output_dir)
     checkpoint_path = output_dir / "checkpoint.json"
     if config.fresh and checkpoint_path.exists():
@@ -105,6 +147,10 @@ def run_exp2(
     predictors = {
         method: FutureStatePredictor(llm, mode=method) for method in METHODS
     }
+    response_generators = {
+        method: Exp2ResponseGenerator(llm, method=method) for method in METHODS
+    }
+    state_reasoner = FrameworkStateReasoner(llm)
     started = perf_counter()
     run_failures: List[Dict[str, Any]] = []
     print(
@@ -137,6 +183,18 @@ def run_exp2(
         profile, profile_key = _cached_profile(
             checkpoint, llm, config, split, profile_corpus, target_speaker
         )
+        persona_corpus, persona_source = _partner_persona_corpus(
+            dataset_dir,
+            partner_speaker,
+            config.profile_sessions,
+        )
+        persona, persona_key = _cached_persona(
+            checkpoint,
+            llm,
+            config,
+            partner_speaker,
+            persona_corpus,
+        )
         points = build_message_level_points(
             test_chat,
             target_speaker,
@@ -149,33 +207,56 @@ def run_exp2(
             f"test={test_file.name} points={len(points)}"
         )
 
+        rolling_framework_state: Dict[str, Any] = {}
         for index, point in enumerate(points, start=1):
             result_id = (
                 f"{_speaker_id(target_speaker)}:{test_file.stem}:"
                 f"{point['sample_id']}"
             )
             if result_id in checkpoint.data["results"]:
+                saved = checkpoint.data["results"][result_id]
+                rolling_framework_state = (
+                    saved.get("framework_state") or rolling_framework_state
+                )
                 print(f"  [{index}/{len(points)}] resume {point['eval_id']}")
                 continue
             print(f"  [{index}/{len(points)}] evaluate {point['eval_id']}")
             sample_started = perf_counter()
             try:
-                reference = _cached_reference(
+                recent_exchange, observed_user_input, observed_partner_reply = (
+                    latest_complete_exchange(
+                        point["context_turns"],
+                        target_speaker,
+                        partner_speaker,
+                    )
+                )
+                framework_state = _cached_framework_state(
                     checkpoint,
+                    state_reasoner,
                     llm,
                     config,
                     result_id,
+                    recent_exchange,
+                    (
+                        point["context_turns"][:-len(recent_exchange)]
+                        if recent_exchange else point["context_turns"]
+                    ),
+                    observed_user_input,
+                    observed_partner_reply,
+                    profile,
+                    persona,
+                    rolling_framework_state,
+                )
+                reference = _cached_message_ei(
+                    checkpoint,
+                    llm,
+                    label_evaluator,
+                    config,
+                    result_id,
+                    "future_user_message",
                     target_speaker,
                     point["context_text"],
                     point["target_message"],
-                )
-                latest_message, current_state = _cached_latest_observed_state(
-                    checkpoint,
-                    llm,
-                    config,
-                    result_id,
-                    target_speaker,
-                    point["context_turns"],
                 )
                 methods: Dict[str, Any] = {}
                 for method in METHODS:
@@ -186,13 +267,14 @@ def run_exp2(
                         config=config,
                         result_id=result_id,
                         method=method,
-                        latest_observed_message=latest_message,
+                        recent_exchange=recent_exchange,
                         context_turns=point["context_turns"],
                         profile=profile if method in {
                             "user_profile", "full_framework"
                         } else None,
-                        current_state=(
-                            current_state if method == "full_framework" else None
+                        framework_state=(
+                            framework_state
+                            if method == "full_framework" else None
                         ),
                     )
                     methods[method] = {
@@ -205,6 +287,82 @@ def run_exp2(
                     partner_speaker,
                     config.test_sessions,
                 )
+                empathy_alignment: Dict[str, Any] = {}
+                response_reference_ei: Optional[Dict[str, Any]] = None
+                if config.run_generation and response_reference is not None:
+                    empathy_alignment = _cached_empathy_alignment(
+                        checkpoint,
+                        llm,
+                        config,
+                        result_id,
+                        point,
+                        profile,
+                        persona,
+                        framework_state,
+                    )
+                    response_reference_ei = _cached_message_ei(
+                        checkpoint,
+                        llm,
+                        label_evaluator,
+                        config,
+                        result_id,
+                        "ground_truth_partner_response",
+                        partner_speaker,
+                        (
+                            point["context_text"]
+                            + "\n"
+                            + f"{target_speaker}: {point['target_message']}"
+                        ),
+                        response_reference["content"],
+                    )
+                    for method in METHODS:
+                        guidance = None
+                        if method == "full_framework":
+                            guidance = {
+                                "state": framework_state,
+                                "empathy_alignment": empathy_alignment,
+                            }
+                        generated = _cached_generated_response(
+                            checkpoint,
+                            response_generators[method],
+                            llm,
+                            config,
+                            result_id,
+                            method,
+                            point,
+                            target_speaker,
+                            partner_speaker,
+                            profile if method in {
+                                "user_profile", "full_framework"
+                            } else None,
+                            persona,
+                            guidance,
+                        )
+                        generated_ei = _cached_message_ei(
+                            checkpoint,
+                            llm,
+                            label_evaluator,
+                            config,
+                            result_id,
+                            f"generated_{method}",
+                            partner_speaker,
+                            (
+                                point["context_text"]
+                                + "\n"
+                                + f"{target_speaker}: {point['target_message']}"
+                            ),
+                            generated,
+                        )
+                        methods[method]["generation"] = {
+                            "response": generated,
+                            "response_ei": generated_ei,
+                            "scores": compute_response_scores(
+                                reference_text=response_reference["content"],
+                                candidate_text=generated,
+                                reference_ei=response_reference_ei,
+                                candidate_ei=generated_ei,
+                            ),
+                        }
                 result = {
                     "result_id": result_id,
                     "speaker": target_speaker,
@@ -225,9 +383,11 @@ def run_exp2(
                         response_reference.get("dia_ids", [])
                         if response_reference is not None else []
                     ),
+                    "ground_truth_response_ei": response_reference_ei,
                     "reference": reference,
-                    "latest_observed_user_message": latest_message,
-                    "causal_current_state": current_state,
+                    "recent_complete_exchange": recent_exchange,
+                    "framework_state": framework_state,
+                    "empathy_alignment": empathy_alignment,
                     "methods": methods,
                     "profile": {
                         "source": "fixed_cross_conversation_ca",
@@ -237,6 +397,13 @@ def run_exp2(
                         "characters": len(
                             json.dumps(profile, ensure_ascii=False, indent=2)
                         ),
+                    },
+                    "agent_persona": {
+                        "speaker": partner_speaker,
+                        "source": persona_source,
+                        "history_hash": persona_corpus["history_hash"],
+                        "train_sessions": persona_corpus["sessions"],
+                        "cache_key": persona_key,
                     },
                     "context": {
                         "source": "rolling_real_history_within_selected_cb",
@@ -256,6 +423,7 @@ def run_exp2(
                     "status": "complete",
                 }
                 checkpoint.store_result(result_id, result)
+                rolling_framework_state = framework_state or rolling_framework_state
             except Exception as exc:
                 failure = {
                     "result_id": result_id,
@@ -275,6 +443,8 @@ def run_exp2(
                     raise
 
     results = sorted(checkpoint.result_values(), key=_result_sort_key)
+    if config.compute_bertscore:
+        add_batched_bertscore(results)
     summary = aggregate_results(results)
     summary.update({
         "elapsed_seconds": round(perf_counter() - started, 3),
@@ -302,12 +472,12 @@ def run_exp2(
                 "the human target is hidden from all predictors"
             ),
             "reference": (
-                "the same configured Kimi model labels the hidden human target "
-                "under the strict REALTALK-style schema"
+                "pinned REALTALK classifiers label emotion, sentiment, and "
+                "intimacy; Kimi supplies only non-classifier attributes"
             ),
-            "paper_metrics": (
-                "categorical attribute accuracy and continuous attribute "
-                "absolute difference"
+            "generation": (
+                "all four methods answer the same observed target message; "
+                "the human partner's next merged message is the reference"
             ),
             "topic": (
                 "Exp2-specific extension retained as exploratory output and "
@@ -322,9 +492,19 @@ def run_exp2(
         "run_signature": signature,
         "response_schemas": {
             "future_state": FUTURE_STATE_RESPONSE_SCHEMA,
+            "framework_state": FRAMEWORK_STATE_RESPONSE_SCHEMA,
             "reference_judgment": REFERENCE_JUDGMENT_SCHEMA,
         },
         "future_state_max_tokens": FUTURE_STATE_MAX_TOKENS,
+        "framework_state_max_tokens": FRAMEWORK_STATE_MAX_TOKENS,
+        "response_max_tokens": RESPONSE_MAX_TOKENS,
+        "label_evaluator": label_evaluator.metadata(),
+        "bertscore": {
+            "model_type": BERTSCORE_MODEL,
+            "num_layers": BERTSCORE_NUM_LAYERS,
+            "idf": False,
+            "rescale_with_baseline": False,
+        },
         "metric_protocol": _metric_protocol(),
         "network_retry_max_attempts": getattr(llm, "max_retries", None),
         "operation_retry_max_attempts": config.operation_max_attempts,
@@ -336,6 +516,21 @@ def run_exp2(
                 + PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE
             ),
             "reference": stable_hash(REFERENCE_JUDGE_SYSTEM_PROMPT),
+            "persona": stable_hash(
+                PERSONA_EXTRACTION_SYSTEM_PROMPT
+                + PERSONA_EXTRACTION_USER_PROMPT_TEMPLATE
+            ),
+            "framework_state": stable_hash(
+                BACKGROUND_REASONING_SYSTEM_PROMPT
+                + BACKGROUND_REASONING_USER_PROMPT_TEMPLATE
+            ),
+            "empathy_alignment": stable_hash(
+                EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT
+                + EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE
+            ),
+            "response_generation": stable_hash(
+                DDIRECT_RESPONSE_SYSTEM_PROMPT
+            ),
         },
         "output_contract": {
             "results.jsonl": "complete per-sample four-method comparisons",
@@ -344,18 +539,21 @@ def run_exp2(
             "checkpoint.json": "resumable operation cache",
             "run_manifest.json": "protocol, model, hashes, and retry metadata",
         },
-        "response_generation_readiness": {
-            "status": "raw_inputs_preserved",
+        "response_generation": {
+            "enabled": config.run_generation,
+            "bertscore_enabled": config.compute_bertscore,
             "fields": [
                 "context.turns",
                 "target_message",
                 "ground_truth_response",
                 "methods.*.prediction",
-                "profile cache key",
+                "methods.*.generation.response",
+                "methods.*.generation.response_ei",
+                "methods.*.generation.scores",
             ],
             "note": (
-                "ROUGE, BERTScore, response EI differences, and EPITOME are "
-                "computed in the separate response-generation stage."
+                "Raw response pairs and EI labels are retained even when "
+                "BERTScore is deferred."
             ),
         },
     })
@@ -407,79 +605,154 @@ def _cached_profile(
     return profile, key
 
 
-def _cached_reference(
-    checkpoint: OperationCheckpoint,
-    llm: LLMClient,
-    config: Exp2Config,
-    result_id: str,
-    speaker: str,
-    history_text: str,
-    target_message: str,
-) -> Dict[str, Any]:
-    input_hash = stable_hash({
-        "speaker": speaker,
-        "history": history_text,
-        "target": target_message,
-        "system": REFERENCE_JUDGE_SYSTEM_PROMPT,
-        "schema": REFERENCE_JUDGMENT_SCHEMA,
-    })
-    key = f"reference_judgment:{result_id}:{input_hash}"
-    prompt = (
-        f"CONVERSATION HISTORY:\n{history_text or '(none)'}\n\n"
-        f"CURRENT OBSERVED MESSAGE BY {speaker}:\n{target_message}\n\n"
-        "Judge only the current observed message, using its prior context."
-    )
-    return checkpoint.execute(
-        key,
-        lambda: _reference_call(llm, prompt),
-        normalize_reference_judgment,
-        max_attempts=config.operation_max_attempts,
-        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
-    )
-
-
-def _cached_latest_observed_state(
-    checkpoint: OperationCheckpoint,
-    llm: LLMClient,
-    config: Exp2Config,
-    result_id: str,
-    speaker: str,
-    context_turns: List[Dict[str, Any]],
-) -> tuple[str, Dict[str, Any]]:
-    latest_index = next(
+def _partner_persona_corpus(
+    dataset_dir: Path,
+    partner_speaker: str,
+    profile_sessions: int,
+) -> tuple[Dict[str, Any], str]:
+    split = next(
         (
-            index for index in range(len(context_turns) - 1, -1, -1)
-            if context_turns[index]["speaker"].casefold() == speaker.casefold()
+            item for item in REALTALK_PERSONA_SPLITS
+            if item["speaker"].casefold() == partner_speaker.casefold()
         ),
         None,
     )
-    if latest_index is None:
-        return "(no prior user message)", {}
-    latest = context_turns[latest_index]
-    prior = context_turns[:latest_index]
-    history_text = "\n".join(
-        f"{turn['speaker']}: {turn['content']}" for turn in prior
+    if split is None:
+        raise ValueError(
+            f"no REALTALK persona split is defined for {partner_speaker}"
+        )
+    train_file = dataset_dir / split["train_chat"]
+    if not train_file.exists():
+        raise FileNotFoundError(
+            f"agent persona corpus is missing: {train_file.name}"
+        )
+    train_chat = load_json(str(train_file))
+    speaker = canonical_speaker(train_chat, partner_speaker)
+    return (
+        build_profile_corpus(train_chat, speaker, profile_sessions),
+        f"fixed_cross_conversation_ca:{train_file.name}",
     )
+
+
+def _cached_persona(
+    checkpoint: OperationCheckpoint,
+    llm: LLMClient,
+    config: Exp2Config,
+    speaker: str,
+    corpus: Dict[str, Any],
+) -> tuple[Dict[str, Any], str]:
+    system_prompt = PERSONA_EXTRACTION_SYSTEM_PROMPT.format(agent_name=speaker)
+    user_prompt = PERSONA_EXTRACTION_USER_PROMPT_TEMPLATE.format(
+        agent_name=speaker,
+        corpus=corpus["text"],
+    )
+    prompt_hash = stable_hash(system_prompt + user_prompt)
+    key = ":".join((
+        "persona",
+        _speaker_id(speaker),
+        f"sessions_{config.profile_sessions}",
+        corpus["history_hash"],
+        str(getattr(llm, "model", "unknown")),
+        prompt_hash,
+    ))
+    persona = checkpoint.execute(
+        key,
+        lambda: robust_parse_json(llm.chat(
+            system_prompt,
+            user_prompt,
+            temperature=0.3,
+            max_tokens=2048,
+        )),
+        lambda value: _validate_persona(value, speaker),
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
+    return persona, key
+
+
+def _cached_message_ei(
+    checkpoint: OperationCheckpoint,
+    llm: LLMClient,
+    label_evaluator: RealTalkLabelEvaluator,
+    config: Exp2Config,
+    result_id: str,
+    role: str,
+    speaker: str,
+    history_text: str,
+    message: str,
+) -> Dict[str, Any]:
     input_hash = stable_hash({
+        "role": role,
         "speaker": speaker,
         "history": history_text,
-        "observed": latest["content"],
+        "message": message,
+        "system": REFERENCE_JUDGE_SYSTEM_PROMPT,
         "schema": REFERENCE_JUDGMENT_SCHEMA,
+        "classifier": label_evaluator.metadata(),
     })
-    key = f"causal_state:{result_id}:{input_hash}"
+    key = f"message_ei:{result_id}:{role}:{input_hash}"
     prompt = (
         f"CONVERSATION HISTORY:\n{history_text or '(none)'}\n\n"
-        f"CURRENT OBSERVED MESSAGE BY {speaker}:\n{latest['content']}\n\n"
+        f"CURRENT OBSERVED MESSAGE BY {speaker}:\n{message}\n\n"
         "Judge only the current observed message, using its prior context."
     )
-    state = checkpoint.execute(
+
+    def operation() -> Dict[str, Any]:
+        judgment = _reference_call(llm, prompt)
+        fixed_labels = label_evaluator.annotate(message)
+        return {
+            **judgment,
+            **fixed_labels,
+        }
+
+    return checkpoint.execute(
         key,
-        lambda: _reference_call(llm, prompt),
+        operation,
         normalize_reference_judgment,
         max_attempts=config.operation_max_attempts,
         usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
     )
-    return latest["content"], state
+
+
+def _cached_framework_state(
+    checkpoint: OperationCheckpoint,
+    reasoner: FrameworkStateReasoner,
+    llm: LLMClient,
+    config: Exp2Config,
+    result_id: str,
+    recent_exchange: List[Dict[str, Any]],
+    prior_context: List[Dict[str, Any]],
+    user_input: str,
+    assistant_response: str,
+    profile: Dict[str, Any],
+    persona: Dict[str, Any],
+    previous_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not recent_exchange or not user_input or not assistant_response:
+        return previous_state
+    input_hash = stable_hash({
+        "exchange": recent_exchange,
+        "prior_context": prior_context,
+        "profile": profile,
+        "persona": persona,
+        "previous_state": previous_state,
+        "schema": FRAMEWORK_STATE_RESPONSE_SCHEMA,
+    })
+    key = f"framework_state:{result_id}:{input_hash}"
+    return checkpoint.execute(
+        key,
+        lambda: reasoner.derive(
+            user_input=user_input,
+            assistant_response=assistant_response,
+            static_profile=profile,
+            previous_state=previous_state,
+            previous_context=prior_context[-10:],
+            agent_persona=persona,
+        ),
+        normalize_framework_state,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
 
 
 def _cached_prediction(
@@ -489,13 +762,14 @@ def _cached_prediction(
     config: Exp2Config,
     result_id: str,
     method: str,
-    latest_observed_message: str,
+    recent_exchange: List[Dict[str, Any]],
     context_turns: List[Dict[str, Any]],
     profile: Optional[Dict[str, Any]],
-    current_state: Optional[Dict[str, Any]],
+    framework_state: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     method_history = [] if method == "llm_only" else context_turns
-    effective_state = current_state or None
+    method_exchange = recent_exchange if method == "llm_only" else []
+    effective_state = framework_state or None
     effective_method = method
     if method == "dialogue_history" and not method_history:
         effective_method = "llm_only"
@@ -503,10 +777,10 @@ def _cached_prediction(
         effective_method = "user_profile"
     input_hash = stable_hash({
         "effective_method": effective_method,
-        "latest_observed_message": latest_observed_message,
+        "recent_exchange": method_exchange,
         "history": method_history,
         "profile": profile,
-        "current_state": effective_state,
+        "framework_state": effective_state,
         "system": PREDICTION_SYSTEM_PROMPT,
         "schema": FUTURE_STATE_RESPONSE_SCHEMA,
     })
@@ -514,12 +788,94 @@ def _cached_prediction(
     return checkpoint.execute(
         key,
         lambda: predictor.predict(
-            user_message=latest_observed_message,
+            recent_exchange=method_exchange,
             conversation_history=method_history,
             user_profile=profile,
             current_state=effective_state,
         ),
         normalize_future_state,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
+
+
+def _cached_empathy_alignment(
+    checkpoint: OperationCheckpoint,
+    llm: LLMClient,
+    config: Exp2Config,
+    result_id: str,
+    point: Dict[str, Any],
+    profile: Dict[str, Any],
+    persona: Dict[str, Any],
+    framework_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    input_hash = stable_hash({
+        "target_message": point["target_message"],
+        "context": point["context_turns"],
+        "profile": profile,
+        "persona": persona,
+        "framework_state": framework_state,
+        "interaction_count": point["message_level_index"],
+    })
+    key = f"empathy_alignment:{result_id}:{input_hash}"
+
+    def operation() -> Dict[str, Any]:
+        reasoner = EmpathyAlignmentReasoner(
+            llm,
+            interaction_count=point["message_level_index"],
+        )
+        return reasoner.reason(
+            point["target_message"],
+            point["context_turns"],
+            profile,
+            persona,
+            framework_state.get("current_state", {}),
+        )
+
+    return checkpoint.execute(
+        key,
+        operation,
+        _validate_empathy_alignment,
+        max_attempts=config.operation_max_attempts,
+        usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
+    )
+
+
+def _cached_generated_response(
+    checkpoint: OperationCheckpoint,
+    generator: Exp2ResponseGenerator,
+    llm: LLMClient,
+    config: Exp2Config,
+    result_id: str,
+    method: str,
+    point: Dict[str, Any],
+    user_speaker: str,
+    agent_speaker: str,
+    profile: Optional[Dict[str, Any]],
+    persona: Dict[str, Any],
+    framework_guidance: Optional[Dict[str, Any]],
+) -> str:
+    input_hash = stable_hash({
+        "method": method,
+        "target_message": point["target_message"],
+        "context": point["context_turns"],
+        "profile": profile,
+        "persona": persona,
+        "framework_guidance": framework_guidance,
+    })
+    key = f"generated_response:{result_id}:{method}:{input_hash}"
+    return checkpoint.execute(
+        key,
+        lambda: generator.generate(
+            user_message=point["target_message"],
+            context_turns=point["context_turns"],
+            profile=profile,
+            persona=persona,
+            framework_guidance=framework_guidance,
+            agent_speaker=agent_speaker,
+            user_speaker=user_speaker,
+        ),
+        _validate_generated_response,
         max_attempts=config.operation_max_attempts,
         usage_supplier=lambda: dict(getattr(llm, "token_usage", {})),
     )
@@ -549,6 +905,42 @@ def _validate_profile(value: Any) -> Dict[str, Any]:
     if missing:
         raise ValueError(f"explicit profile is missing layers: {missing}")
     return value
+
+
+def _validate_persona(value: Any, speaker: str) -> Dict[str, Any]:
+    required = (
+        "name",
+        "personality",
+        "tone",
+        "interaction_principles",
+        "expression_patterns",
+    )
+    if not isinstance(value, dict) or not all(key in value for key in required):
+        raise ValueError(f"persona for {speaker} is missing required fields")
+    if not str(value.get("personality", "")).strip():
+        raise ValueError(f"persona for {speaker} has no personality")
+    return {key: value[key] for key in required}
+
+
+def _validate_empathy_alignment(value: Any) -> Dict[str, Any]:
+    required = {
+        "understanding",
+        "prediction",
+        "exploration",
+        "alignment",
+        "empathy_state",
+    }
+    if not isinstance(value, dict) or not required.issubset(value):
+        raise ValueError("empathy alignment is incomplete")
+    if not isinstance(value["empathy_state"], dict):
+        raise ValueError("empathy alignment has no empathy_state")
+    return value
+
+
+def _validate_generated_response(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("generated response is empty")
+    return value.strip()
 
 
 def _next_partner_response(
@@ -591,128 +983,234 @@ def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     comparison: Dict[str, Any] = {}
     for method in METHODS:
-        per_speaker: List[Dict[str, float]] = []
-        all_scores: List[Dict[str, float]] = []
-        emotion_records: List[Dict[str, str]] = []
-        sentiment_records: List[Dict[str, str]] = []
-        for speaker, speaker_results in by_speaker.items():
-            scores = [item["methods"][method]["scores"] for item in speaker_results]
-            all_scores.extend(scores)
-            emotion_records.extend({
-                "speaker": speaker,
-                "reference": item["reference"]["emotion"],
-                "prediction": item["methods"][method]["prediction"]["emotion"],
-            } for item in speaker_results)
-            sentiment_records.extend({
-                "speaker": speaker,
-                "reference": item["reference"]["sentiment"],
-                "prediction": item["methods"][method]["prediction"]["sentiment"],
-            } for item in speaker_results)
-            per_speaker.append({
-                metric: _mean(score[metric] for score in scores)
-                for metric in (
-                    *HIGHER_IS_BETTER,
-                    *LOWER_IS_BETTER,
-                    *EXTENDED_METRICS,
-                )
-            })
-        emotion_global = classification_report(
-            [item["reference"] for item in emotion_records],
-            [item["prediction"] for item in emotion_records],
-            EMOTION_LABELS,
-        )
-        sentiment_global = classification_report(
-            [item["reference"] for item in sentiment_records],
-            [item["prediction"] for item in sentiment_records],
-            SENTIMENT_LABELS,
-        )
-        emotion_speaker = speaker_macro_report(emotion_records, EMOTION_LABELS)
-        sentiment_speaker = speaker_macro_report(
-            sentiment_records, SENTIMENT_LABELS
-        )
-        speaker_macro = {
-            metric: round(_mean(item[metric] for item in per_speaker), 4)
-            for metric in (
-                *HIGHER_IS_BETTER,
-                *LOWER_IS_BETTER,
-                *EXTENDED_METRICS,
-            )
-        }
-        speaker_macro.update({
-            "emotion_macro_f1": round(emotion_speaker["macro_f1"], 4),
-            "sentiment_macro_f1": round(sentiment_speaker["macro_f1"], 4),
-        })
-        micro = {
-            metric: round(_mean(score[metric] for score in all_scores), 4)
-            for metric in (
-                *HIGHER_IS_BETTER,
-                *LOWER_IS_BETTER,
-                *EXTENDED_METRICS,
-            )
-        }
-        micro.update({
-            "emotion_macro_f1": round(emotion_global["macro_f1"], 4),
-            "sentiment_macro_f1": round(sentiment_global["macro_f1"], 4),
-        })
+        prediction = _aggregate_prediction(by_speaker, method)
+        generation = _aggregate_generation(by_speaker, method)
         comparison[method] = {
-            "speaker_macro": speaker_macro,
-            "micro": micro,
-            "classification_details": {
-                "emotion": {
-                    "global": emotion_global,
-                    "speaker_macro": emotion_speaker,
-                },
-                "sentiment": {
-                    "global": sentiment_global,
-                    "speaker_macro": sentiment_speaker,
-                },
-            },
-            "num_evaluations": len(all_scores),
+            "prediction": prediction,
+            "generation": generation,
         }
     return {
         "comparison": comparison,
         "full_framework_improvement": _improvements(comparison),
+        "prediction_trend": _prediction_trend(results),
         "num_eval_points": len(results),
         "num_speakers": len(by_speaker),
         "metric_protocol": _metric_protocol(),
     }
 
 
-def _improvements(comparison: Dict[str, Any]) -> Dict[str, float]:
-    values: Dict[str, float] = {}
-    full = comparison["full_framework"]["speaker_macro"]
+def _aggregate_prediction(
+    by_speaker: Dict[str, List[Dict[str, Any]]],
+    method: str,
+) -> Dict[str, Any]:
+    metrics = (*HIGHER_IS_BETTER, *LOWER_IS_BETTER, *EXTENDED_METRICS)
+    per_speaker: List[Dict[str, float]] = []
+    all_scores: List[Dict[str, float]] = []
+    emotion_records: List[Dict[str, str]] = []
+    sentiment_records: List[Dict[str, str]] = []
+    for speaker, speaker_results in by_speaker.items():
+        scores = [item["methods"][method]["scores"] for item in speaker_results]
+        all_scores.extend(scores)
+        emotion_records.extend({
+            "speaker": speaker,
+            "reference": item["reference"]["emotion"],
+            "prediction": item["methods"][method]["prediction"]["emotion"],
+        } for item in speaker_results)
+        sentiment_records.extend({
+            "speaker": speaker,
+            "reference": item["reference"]["sentiment"],
+            "prediction": item["methods"][method]["prediction"]["sentiment"],
+        } for item in speaker_results)
+        per_speaker.append({
+            metric: _mean(score[metric] for score in scores)
+            for metric in metrics
+        })
+    emotion_global = classification_report(
+        [item["reference"] for item in emotion_records],
+        [item["prediction"] for item in emotion_records],
+        EMOTION_LABELS,
+    )
+    sentiment_global = classification_report(
+        [item["reference"] for item in sentiment_records],
+        [item["prediction"] for item in sentiment_records],
+        SENTIMENT_LABELS,
+    )
+    emotion_speaker = speaker_macro_report(emotion_records, EMOTION_LABELS)
+    sentiment_speaker = speaker_macro_report(sentiment_records, SENTIMENT_LABELS)
+    speaker_macro = {
+        metric: round(_mean(item[metric] for item in per_speaker), 4)
+        for metric in metrics
+    }
+    speaker_macro.update({
+        "emotion_macro_f1": round(emotion_speaker["macro_f1"], 4),
+        "sentiment_macro_f1": round(sentiment_speaker["macro_f1"], 4),
+    })
+    micro = {
+        metric: round(_mean(score[metric] for score in all_scores), 4)
+        for metric in metrics
+    }
+    micro.update({
+        "emotion_macro_f1": round(emotion_global["macro_f1"], 4),
+        "sentiment_macro_f1": round(sentiment_global["macro_f1"], 4),
+    })
+    return {
+        "speaker_macro": speaker_macro,
+        "micro": micro,
+        "classification_details": {
+            "emotion": {
+                "global": emotion_global,
+                "speaker_macro": emotion_speaker,
+            },
+            "sentiment": {
+                "global": sentiment_global,
+                "speaker_macro": sentiment_speaker,
+            },
+        },
+        "num_evaluations": len(all_scores),
+    }
+
+
+def _aggregate_generation(
+    by_speaker: Dict[str, List[Dict[str, Any]]],
+    method: str,
+) -> Dict[str, Any]:
+    per_speaker: List[Dict[str, float]] = []
+    all_scores: List[Dict[str, float]] = []
+    metric_names = [
+        *RESPONSE_HIGHER_IS_BETTER,
+        *RESPONSE_LOWER_IS_BETTER,
+    ]
+    has_bertscore = any(
+        "bertscore_f1" in (
+            item["methods"][method].get("generation", {}).get("scores", {})
+        )
+        for items in by_speaker.values()
+        for item in items
+    )
+    if has_bertscore:
+        metric_names.append("bertscore_f1")
+    for speaker_results in by_speaker.values():
+        scores = [
+            item["methods"][method]["generation"]["scores"]
+            for item in speaker_results
+            if item["methods"][method].get("generation")
+        ]
+        if not scores:
+            continue
+        all_scores.extend(scores)
+        per_speaker.append({
+            metric: _mean(score[metric] for score in scores if metric in score)
+            for metric in metric_names
+        })
+    return {
+        "speaker_macro": {
+            metric: round(_mean(item[metric] for item in per_speaker), 4)
+            for metric in metric_names
+        },
+        "micro": {
+            metric: round(
+                _mean(score[metric] for score in all_scores if metric in score),
+                4,
+            )
+            for metric in metric_names
+        },
+        "num_evaluations": len(all_scores),
+    }
+
+
+def _prediction_trend(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    trend: Dict[str, Any] = {}
+    for method in METHODS:
+        by_index: Dict[int, List[Dict[str, float]]] = defaultdict(list)
+        for item in results:
+            by_index[int(item["message_level_index"])].append(
+                item["methods"][method]["scores"]
+            )
+        trend[method] = [
+            {
+                "message_level_index": index,
+                "num_samples": len(scores),
+                "emotion_accuracy": round(
+                    _mean(score["emotion_accuracy"] for score in scores), 4
+                ),
+                "sentiment_accuracy": round(
+                    _mean(score["sentiment_accuracy"] for score in scores), 4
+                ),
+                "intimacy_absolute_difference": round(
+                    _mean(
+                        score["intimacy_absolute_difference"]
+                        for score in scores
+                    ),
+                    4,
+                ),
+            }
+            for index, scores in sorted(by_index.items())
+        ]
+    return trend
+
+
+def _improvements(comparison: Dict[str, Any]) -> Dict[str, Any]:
+    values: Dict[str, Any] = {"prediction": {}, "generation": {}}
+    full_prediction = comparison["full_framework"]["prediction"]["speaker_macro"]
+    full_generation = comparison["full_framework"]["generation"]["speaker_macro"]
     for baseline in METHODS[:-1]:
-        other = comparison[baseline]["speaker_macro"]
+        other_prediction = comparison[baseline]["prediction"]["speaker_macro"]
         for metric in (
             *HIGHER_IS_BETTER,
             "emotion_macro_f1",
             "sentiment_macro_f1",
         ):
-            values[f"full_vs_{baseline}_{metric}"] = round(
-                full[metric] - other[metric], 4
+            values["prediction"][f"full_vs_{baseline}_{metric}"] = round(
+                full_prediction[metric] - other_prediction[metric], 4
             )
         for metric in LOWER_IS_BETTER:
-            values[f"full_vs_{baseline}_{metric}_reduction"] = round(
-                other[metric] - full[metric], 4
+            values["prediction"][
+                f"full_vs_{baseline}_{metric}_reduction"
+            ] = round(other_prediction[metric] - full_prediction[metric], 4)
+
+        other_generation = comparison[baseline]["generation"]["speaker_macro"]
+        for metric in RESPONSE_HIGHER_IS_BETTER:
+            if metric in full_generation and metric in other_generation:
+                values["generation"][f"full_vs_{baseline}_{metric}"] = round(
+                    full_generation[metric] - other_generation[metric], 4
+                )
+        if "bertscore_f1" in full_generation and "bertscore_f1" in other_generation:
+            values["generation"][
+                f"full_vs_{baseline}_bertscore_f1"
+            ] = round(
+                full_generation["bertscore_f1"]
+                - other_generation["bertscore_f1"],
+                4,
             )
+        for metric in RESPONSE_LOWER_IS_BETTER:
+            if metric in full_generation and metric in other_generation:
+                values["generation"][
+                    f"full_vs_{baseline}_{metric}_reduction"
+                ] = round(other_generation[metric] - full_generation[metric], 4)
     return values
 
 
 def _metric_protocol() -> Dict[str, Any]:
     return {
-        "primary_metrics": [
+        "prediction_primary_metrics": [
             "emotion_accuracy",
             "sentiment_accuracy",
             "emotion_macro_f1",
             "sentiment_macro_f1",
             "intimacy_absolute_difference",
         ],
-        "paper_aligned_auxiliary_metrics": [
+        "prediction_extended_metrics": list(EXTENDED_METRICS),
+        "generation_paper_aligned_metrics": [
+            "style_similarity",
+            "rouge_l",
+            "bertscore_f1",
             "reflectiveness_accuracy",
             "grounding_accuracy",
+            "sentiment_accuracy",
+            "emotion_accuracy",
+            "intimacy_absolute_difference",
             "empathy_absolute_difference",
         ],
-        "extended_metrics": list(EXTENDED_METRICS),
         "primary_ranking_aggregation": "speaker_macro",
         "categorical_policy": "strict label equality; no semantic-match credit",
         "continuous_policy": "mean absolute difference",
@@ -720,9 +1218,9 @@ def _metric_protocol() -> Dict[str, Any]:
             "lexical overlap retained for exploratory continuity only; excluded "
             "from primary rankings"
         ),
-        "content_similarity": (
-            "ROUGE and BERTScore apply to the response-generation stage, not "
-            "structured future-state prediction"
+        "bertscore_policy": (
+            "computed in one optional batch after generation; raw response "
+            "pairs are always preserved for deterministic recomputation"
         ),
         "composite_score": "none; every metric is reported separately",
     }
@@ -733,6 +1231,7 @@ def _build_metric_records(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     for result in results:
         for method in METHODS:
             records.append({
+                "stage": "prediction",
                 "result_id": result["result_id"],
                 "speaker": result["speaker"],
                 "chat_file": result["chat_file"],
@@ -742,6 +1241,21 @@ def _build_metric_records(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 "prediction": result["methods"][method]["prediction"],
                 "scores": result["methods"][method]["scores"],
             })
+            generation = result["methods"][method].get("generation")
+            if generation:
+                records.append({
+                    "stage": "generation",
+                    "result_id": result["result_id"],
+                    "speaker": result["speaker"],
+                    "chat_file": result["chat_file"],
+                    "eval_id": result["eval_id"],
+                    "method": method,
+                    "reference_text": result["ground_truth_response"],
+                    "reference_ei": result["ground_truth_response_ei"],
+                    "generated_text": generation["response"],
+                    "generated_ei": generation["response_ei"],
+                    "scores": generation["scores"],
+                })
     return records
 
 
@@ -756,23 +1270,40 @@ def _run_signature(
         "continue_on_error",
         "fresh",
         "max_eval_points_per_speaker",
+        "compute_bertscore",
     ):
         signature_config.pop(key, None)
     source_files = [
         Path(__file__),
         Path(__file__).with_name("exp1_protocol.py"),
         Path(__file__).with_name("exp2_schema.py"),
+        Path(__file__).with_name("exp2_framework.py"),
+        Path(__file__).with_name("exp2_generation.py"),
+        Path(__file__).with_name("empathy_alignment_analysis.py"),
         Path(__file__).with_name("operation_checkpoint.py"),
         Path(__file__).parents[1] / "prediction.py",
     ]
     dataset_dir = Path(config.dataset_dir)
-    chat_files = sorted({
+    chat_files = {
         dataset_dir / split[key]
         for split in splits
         for key in ("train_chat", "test_chat")
-    })
+    }
+    for split in splits:
+        test_chat = load_json(str(dataset_dir / split["test_chat"]))
+        target = canonical_speaker(test_chat, split["speaker"])
+        partner = next(
+            speaker for speaker in message_speakers(test_chat)
+            if speaker.casefold() != target.casefold()
+        )
+        partner_split = next(
+            item for item in REALTALK_PERSONA_SPLITS
+            if item["speaker"].casefold() == partner.casefold()
+        )
+        chat_files.add(dataset_dir / partner_split["train_chat"])
+    chat_files = sorted(chat_files)
     return stable_hash({
-        "schema_version": 1,
+        "schema_version": 2,
         "model": getattr(llm, "model", None),
         "enable_thinking": getattr(llm, "enable_thinking", None),
         "config": signature_config,
@@ -871,6 +1402,16 @@ def main() -> None:
     parser.add_argument("--operation-max-attempts", type=int, default=3)
     parser.add_argument("--chats", nargs="*", default=None)
     parser.add_argument("--speakers", nargs="*", default=None)
+    parser.add_argument(
+        "--prediction-only",
+        action="store_true",
+        help="Skip the response-generation stage.",
+    )
+    parser.add_argument(
+        "--bertscore",
+        action="store_true",
+        help="Compute BERTScore in one batch after response generation.",
+    )
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--fresh", action="store_true")
     args = parser.parse_args()
@@ -886,6 +1427,8 @@ def main() -> None:
         chat_filter=args.chats,
         speaker_filter=args.speakers,
         continue_on_error=not args.fail_fast,
+        run_generation=not args.prediction_only,
+        compute_bertscore=args.bertscore,
         fresh=args.fresh,
     ))
 
