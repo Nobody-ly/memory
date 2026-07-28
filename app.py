@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 
 import atexit
 from pathlib import Path
@@ -17,6 +18,7 @@ load_dotenv()
 
 from src.agent import StateDrivenCompanionAgent
 from src.logger import logger
+from src.profile_schema import create_empty_static_profile, normalize_bare_profile, validate_bare_profile
 from src.utils import save_json, load_json
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
@@ -27,13 +29,19 @@ agent = None
 active_profile_id = None
 active_persona_id = None
 conversation_history = []
+agent_state_condition = threading.Condition(threading.RLock())
+agent_chat_lock = threading.Lock()
+active_chat_count = 0
 
 DATASET_OUTPUT_DIR = Path(os.getenv("MEMORY_DATASET_OUTPUT_DIR", "dataset/output_zh"))
 DATASET_USER_DIR = DATASET_OUTPUT_DIR / "user"
 DATASET_AGENT_DIR = DATASET_OUTPUT_DIR / "agent"
-DATASET_TEST_USER_PROFILE = Path("dataset/test_user.json")
+DATASET_TEST_USER_PROFILE = Path("dataset/new_user.json")
 DATASET_TEST_AGENT_PERSONA = Path("dataset/test_agent.json")
 WORKING_PROFILE_DIR = Path("data/active_profiles")
+ALLOW_CREATE_USER_PROFILES = os.getenv(
+    "MEMORY_ALLOW_CREATE_USER_PROFILES", "true"
+).lower() in ("1", "true", "yes", "on")
 
 
 def _humanize(name: str) -> str:
@@ -41,13 +49,60 @@ def _humanize(name: str) -> str:
     return name.replace("_", " ").title()
 
 
+def _validate_profile_id(profile_id: str) -> str:
+    """Keep generated profile paths inside WORKING_PROFILE_DIR."""
+    profile_id = (profile_id or "").strip()
+    if not re.fullmatch(r"[0-9A-Za-z_\-]+", profile_id):
+        raise ValueError("profile_id can only contain letters, numbers, '_' and '-'")
+    return profile_id
+
+
+def _working_profile_path(profile_id: str) -> Path:
+    return WORKING_PROFILE_DIR / f"{profile_id}_profile.json"
+
+
+def ensure_user_profile(profile_id: str) -> dict:
+    profile_id = _validate_profile_id(profile_id)
+    profile_info = USER_PROFILES.get(profile_id)
+    if profile_info:
+        source_path = Path(profile_info["source_path"])
+        if source_path.exists():
+            return profile_info
+        logger.error(
+            f"[PROFILE_INIT] registered profile source is missing: "
+            f"profile_id={profile_id} path={source_path}"
+        )
+
+    if not ALLOW_CREATE_USER_PROFILES:
+        raise ValueError(f"unknown user profile: {profile_id}")
+
+    WORKING_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _working_profile_path(profile_id)
+    if not path.exists():
+        save_json(str(path), create_empty_static_profile())
+        logger.info(
+            f"[PROFILE_INIT] created empty five-layer profile: "
+            f"profile_id={profile_id} path={path}"
+        )
+
+    profile_info = {
+        "id": profile_id,
+        "display_name": _humanize(profile_id),
+        "file_name": path.name,
+        "source_path": str(path),
+    }
+    USER_PROFILES[profile_id] = profile_info
+    return profile_info
+
+
 def discover_user_profiles() -> dict:
-    """Scan dataset output user profiles and build selectable profile metadata."""
+    """Load the configured single test user profile."""
     profiles = {}
     if DATASET_TEST_USER_PROFILE.exists():
-        profiles["test_user"] = {
-            "id": "test_user",
-            "display_name": "Test User",
+        profile_id = DATASET_TEST_USER_PROFILE.stem
+        profiles[profile_id] = {
+            "id": profile_id,
+            "display_name": _humanize(profile_id),
             "file_name": DATASET_TEST_USER_PROFILE.name,
             "source_path": str(DATASET_TEST_USER_PROFILE),
         }
@@ -60,11 +115,20 @@ def discover_user_profiles() -> dict:
                 "file_name": path.name,
                 "source_path": str(path),
             }
+    if WORKING_PROFILE_DIR.exists():
+        for path in sorted(WORKING_PROFILE_DIR.glob("*_profile.json")):
+            profile_id = path.stem.removesuffix("_profile")
+            profiles.setdefault(profile_id, {
+                "id": profile_id,
+                "display_name": _humanize(profile_id),
+                "file_name": path.name,
+                "source_path": str(path),
+            })
     return profiles
 
 
 def discover_agent_personas() -> dict:
-    """Scan dataset output agent personas and build selectable persona metadata."""
+    """Load the single test agent persona from dataset/test_agent.json."""
     personas = {}
     if DATASET_TEST_AGENT_PERSONA.exists():
         personas["test_agent"] = {
@@ -84,27 +148,13 @@ def discover_agent_personas() -> dict:
             }
     return personas
 
-
 USER_PROFILES = discover_user_profiles()
 AGENT_PERSONAS = discover_agent_personas()
 
 
 def _wrap_dataset_profile(raw: dict) -> dict:
-    """Wrap a raw 5-layer dataset profile into the state_axis format the agent expects."""
-    if "state_axis" in raw:
-        return raw
-    return {
-        "state_axis": {
-            "static_profile": raw,
-            "current_state": {},
-            "projected_state": {},
-        },
-        "context_axis": {
-            "current_context": "",
-            "context_detail": "",
-            "inferred_at_turn": 0,
-        },
-    }
+    """Normalize dataset or legacy input to the persisted bare five-layer profile."""
+    return normalize_bare_profile(raw)
 
 def finalize_agent_session() -> dict:
     if agent is None:
@@ -117,6 +167,9 @@ def finalize_agent_session() -> dict:
 
 def finalize_agent_instance(agent_instance: StateDrivenCompanionAgent) -> None:
     try:
+        updater = getattr(agent_instance, "profile_batch_updater", None)
+        if updater is not None:
+            updater.close()
         agent_instance.finalize_session()
     except Exception as e:
         logger.error(f"[FINALIZE_AGENT] error: {e}")
@@ -127,9 +180,7 @@ def require_agent():
     return None
 
 def build_agent_for_character(profile_id: str, persona_id: str) -> StateDrivenCompanionAgent:
-    profile_info = USER_PROFILES.get(profile_id)
-    if not profile_info:
-        raise ValueError(f"unknown user profile: {profile_id}")
+    profile_info = ensure_user_profile(profile_id)
 
     persona_info = AGENT_PERSONAS.get(persona_id)
     if not persona_info:
@@ -146,10 +197,12 @@ def build_agent_for_character(profile_id: str, persona_id: str) -> StateDrivenCo
     raw_profile = load_json(str(source_profile_path))
     wrapped = _wrap_dataset_profile(raw_profile)
 
-    # Save working copy so agent mutations don't overwrite the dataset original
+    # Create the working copy once. Reuse it on later selections/restarts so
+    # accumulated profile growth is not overwritten by the dataset seed.
     WORKING_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    working_profile_path = WORKING_PROFILE_DIR / f"{profile_id}_profile.json"
-    save_json(str(working_profile_path), copy.deepcopy(wrapped))
+    working_profile_path = _working_profile_path(profile_id)
+    if not working_profile_path.exists():
+        save_json(str(working_profile_path), copy.deepcopy(wrapped))
 
     return StateDrivenCompanionAgent(
         profile_path=str(working_profile_path),
@@ -212,55 +265,82 @@ def select_character():
 
     if not profile_id:
         return jsonify({"error": "profile_id is required"}), 400
-
     if not persona_id:
-        if AGENT_PERSONAS:
-            persona_id = list(AGENT_PERSONAS.keys())[0]
-        else:
-            return jsonify({"error": "no agent personas available"}), 400
+        return jsonify({"error": "persona_id is required"}), 400
 
-    if profile_id == active_profile_id and persona_id == active_persona_id and agent is not None:
-        return jsonify({
-            "message": "character already active",
-            "profile": agent.user_profile,
-            "profile_name": USER_PROFILES[profile_id]["display_name"],
-            "persona_name": AGENT_PERSONAS[persona_id]["display_name"],
-        }), 200
+    with agent_state_condition:
+        while active_chat_count:
+            agent_state_condition.wait()
 
-    try:
-        if agent is not None:
-            threading.Thread(
-                target=finalize_agent_instance,
-                args=(agent,),
-                daemon=True,
-            ).start()
+        if profile_id == active_profile_id and persona_id == active_persona_id and agent is not None:
+            return jsonify({
+                "message": "character already active",
+                "profile_id": active_profile_id,
+                "persona_id": active_persona_id,
+                "profile": agent.user_profile,
+                "profile_name": USER_PROFILES[profile_id]["display_name"],
+                "persona_name": AGENT_PERSONAS[persona_id]["display_name"],
+            }), 200
 
-        agent = build_agent_for_character(profile_id, persona_id)
+        previous_agent = agent
+        agent = None
+        active_profile_id = None
+        active_persona_id = None
+        if previous_agent is not None:
+            finalize_agent_instance(previous_agent)
+
+        try:
+            next_agent = build_agent_for_character(profile_id, persona_id)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+        agent = next_agent
         active_profile_id = profile_id
         active_persona_id = persona_id
         conversation_history.clear()
         return jsonify({
             "message": "character selected",
+            "profile_id": active_profile_id,
+            "persona_id": active_persona_id,
             "profile": agent.user_profile,
             "profile_name": USER_PROFILES[profile_id]["display_name"],
             "persona_name": AGENT_PERSONAS[persona_id]["display_name"],
         }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    agent_error = require_agent()
-    if agent_error:
-        return agent_error
+    global active_chat_count
 
     data = request.json or {}
+    requested_profile_id = data.get("profile_id")
+    requested_persona_id = data.get("persona_id")
     user_input = data.get("message", "").strip()
     ablate_dimension = data.get("ablate_dimension")
 
+    if not requested_profile_id:
+        return jsonify({"error": "profile_id is required"}), 400
+    if not requested_persona_id:
+        return jsonify({"error": "persona_id is required"}), 400
     if not user_input:
         return jsonify({"error": "message is required"}), 400
+
+    with agent_state_condition:
+        if agent is None:
+            return jsonify({"error": "character is required"}), 409
+        if (
+            requested_profile_id != active_profile_id
+            or requested_persona_id != active_persona_id
+        ):
+            return jsonify({
+                "error": "character selection mismatch",
+                "requested_profile_id": requested_profile_id,
+                "active_profile_id": active_profile_id,
+                "requested_persona_id": requested_persona_id,
+                "active_persona_id": active_persona_id,
+            }), 409
+        local_agent = agent
+        active_chat_count += 1
 
     t_start = time.perf_counter()
 
@@ -269,48 +349,58 @@ def chat():
 
     @stream_with_context
     def generate():
+        global active_chat_count
         first_token_time = None
         try:
-            for event in agent.chat_stream(user_input, ablate_dimension=ablate_dimension):
-                event_type = event.get("type")
+            with agent_chat_lock:
+                for event in local_agent.chat_stream(user_input, ablate_dimension=ablate_dimension):
+                    event_type = event.get("type")
 
-                if event_type == "token":
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter() - t_start
-                    yield encode_event(event)
-                    continue
+                    if event_type == "token":
+                        if first_token_time is None:
+                            first_token_time = time.perf_counter() - t_start
+                        yield encode_event(event)
+                        continue
 
-                if event_type == "profile_activation":
-                    logger.info(
-                        "[PROFILE_ACTIVATION] "
-                        + json.dumps(event, ensure_ascii=False)[:2000]
-                    )
-                    yield encode_event(event)
-                    continue
+                    if event_type == "profile_activation":
+                        logger.info(
+                            "[PROFILE_ACTIVATION] "
+                            + json.dumps(event, ensure_ascii=False)[:2000]
+                        )
+                        yield encode_event(event)
+                        continue
 
-                if event_type == "done":
-                    response = event["response"]
-                    total = time.perf_counter() - t_start
-                    logger.info(f"[CHAT] first_token={first_token_time:.3f}s total={total:.3f}s chars={len(response)}")
+                    if event_type == "done":
+                        response = event["response"]
+                        total = time.perf_counter() - t_start
+                        first_token = first_token_time if first_token_time is not None else total
+                        logger.info(
+                            f"[CHAT] first_token={first_token:.3f}s "
+                            f"total={total:.3f}s chars={len(response)}"
+                        )
 
-                    conversation_history.append({"role": "user", "content": user_input})
-                    conversation_history.append({"role": "assistant", "content": response})
+                        conversation_history.append({"role": "user", "content": user_input})
+                        conversation_history.append({"role": "assistant", "content": response})
 
-                    yield encode_event({
-                        "type": "done",
-                        "message": response,
-                        "profile": agent.user_profile,
-                        "conversation_length": len(conversation_history),
-                        "updated_fields": event.get("updated_fields", ["state_axis.current_state", "state_axis.projected_state"]),
-                        "background_memory_running": event.get("background_memory_running", False),
-                        "model_timing": event.get("model_timing"),
-                        "usage": event.get("usage"),
-                        "ablate_dimension": event.get("ablate_dimension"),
-                        "activated_persona": event.get("activated_persona", {}),
-                        "decision": event.get("decision", {}),
-                    })
+                        yield encode_event({
+                            "type": "done",
+                            "message": response,
+                            "profile": local_agent.user_profile,
+                            "conversation_length": len(conversation_history),
+                            "updated_fields": event.get("updated_fields", ["state_axis.current_state", "state_axis.projected_state"]),
+                            "background_memory_running": event.get("background_memory_running", False),
+                            "model_timing": event.get("model_timing"),
+                            "usage": event.get("usage"),
+                            "ablate_dimension": event.get("ablate_dimension"),
+                            "activated_persona": event.get("activated_persona", {}),
+                            "decision": event.get("decision", {}),
+                        })
         except Exception as e:
             yield encode_event({"type": "error", "error": str(e)})
+        finally:
+            with agent_state_condition:
+                active_chat_count -= 1
+                agent_state_condition.notify_all()
 
     return Response(generate(), mimetype="application/x-ndjson")
 
@@ -378,47 +468,56 @@ def _handle_voice_msg(ws, data):
 
 
 def _run_chat_via_ws(ws, message, system_start_ms, ablate_dimension):
-    """Run agent chat and stream tokens back to the client over the voice WS.
-    Eliminates the frontend round-trip after ASR completes."""
-    agent_error = require_agent()
-    if agent_error is not None:
-        try:
-            ws.send(json.dumps({"type": "chat_error", "error": "agent not ready"}, ensure_ascii=False))
-        except Exception:
-            pass
-        return
+    """Run one voice chat against an immutable snapshot of the active Agent."""
+    global active_chat_count
+
+    with agent_state_condition:
+        if agent is None:
+            try:
+                ws.send(json.dumps({"type": "chat_error", "error": "agent not ready"}, ensure_ascii=False))
+            except Exception:
+                pass
+            return
+        local_agent = agent
+        active_chat_count += 1
+
     t_start = time.perf_counter()
     first_token_time = None
     try:
-        ws.send(json.dumps({"type": "chat_start", "system_start_ms": system_start_ms}, ensure_ascii=False))
-        for event in agent.chat_stream(message, ablate_dimension=ablate_dimension):
-            event_type = event.get("type")
-            if event_type == "token":
-                if first_token_time is None:
-                    first_token_time = time.perf_counter() - t_start
-                    logger.info(f"[CHAT] first_token={first_token_time:.3f}s input={message!r:.50}")
-                try:
-                    ws.send(json.dumps({"type": "chat_token", "content": event.get("content", "")}, ensure_ascii=False))
-                except Exception as e:
-                    logger.error(f"[WS] chat_token send failed: {e}")
-                    return
-            elif event_type == "done":
-                response = event["response"]
-                total = time.perf_counter() - t_start
-                logger.info(f"[CHAT] total={total:.3f}s chars={len(response)}")
-                ws.send(json.dumps({
-                    "type": "chat_done",
-                    "response": response,
-                    "profile": agent.user_profile,
-                    "updated_fields": event.get("updated_fields", []),
-                    "background_memory_running": event.get("background_memory_running", False),
-                }, ensure_ascii=False))
+        with agent_chat_lock:
+            ws.send(json.dumps({"type": "chat_start", "system_start_ms": system_start_ms}, ensure_ascii=False))
+            for event in local_agent.chat_stream(message, ablate_dimension=ablate_dimension):
+                event_type = event.get("type")
+                if event_type == "token":
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter() - t_start
+                        logger.info(f"[CHAT] first_token={first_token_time:.3f}s input={message!r:.50}")
+                    try:
+                        ws.send(json.dumps({"type": "chat_token", "content": event.get("content", "")}, ensure_ascii=False))
+                    except Exception as e:
+                        logger.error(f"[WS] chat_token send failed: {e}")
+                        return
+                elif event_type == "done":
+                    response = event["response"]
+                    total = time.perf_counter() - t_start
+                    logger.info(f"[CHAT] total={total:.3f}s chars={len(response)}")
+                    ws.send(json.dumps({
+                        "type": "chat_done",
+                        "response": response,
+                        "profile": local_agent.user_profile,
+                        "updated_fields": event.get("updated_fields", []),
+                        "background_memory_running": event.get("background_memory_running", False),
+                    }, ensure_ascii=False))
     except Exception as e:
         logger.error(f"[WS] chat stream error: {e}")
         try:
             ws.send(json.dumps({"type": "chat_error", "error": str(e)}, ensure_ascii=False))
         except Exception:
             pass
+    finally:
+        with agent_state_condition:
+            active_chat_count -= 1
+            agent_state_condition.notify_all()
 
 
 class _StreamASRSession:
@@ -664,7 +763,8 @@ def get_profile():
     agent_error = require_agent()
     if agent_error:
         return agent_error
-    return jsonify(agent.user_profile), 200
+    profile = normalize_bare_profile(agent.user_profile)
+    return jsonify(profile), 200
 
 
 @app.route("/api/profile", methods=["POST"])
@@ -675,9 +775,12 @@ def update_profile():
 
     data = request.json or {}
     try:
-        agent.user_profile.update(data)
-        save_json(agent.profile_path, agent.user_profile)
-        return jsonify({"message": "profile updated", "profile": agent.user_profile}), 200
+        profile = validate_bare_profile(data)
+        agent._on_profile_updated(profile)
+        save_json(agent.profile_path, profile)
+        return jsonify({"message": "profile updated", "profile": profile}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

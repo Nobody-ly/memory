@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 memory.json
 user_profile_*.json
+*.pending.json
 .env
 logs/app.log

@@ -25,9 +25,10 @@ from .prompts.templates import (
     LONG_TERM_MEMORY_SYSTEM_PROMPT,
     LONG_TERM_MEMORY_USER_PROMPT_TEMPLATE,
 )
+from .logger import logger
 from .utils import parse_json
 
-_EMBEDDING_DIM = 1536  # text-embedding-v4 default dim
+_DEFAULT_EMBEDDING_DIM = 1536
 
 
 class MemoryOSLocal:
@@ -46,6 +47,9 @@ class MemoryOSLocal:
         api_config = config["API"]
         self.embedding_model_name = embedding_model_name or api_config.get(
             "embedding_model", fallback="text-embedding-v4"
+        )
+        self.embedding_dimension = api_config.getint(
+            "embedding_dimension", fallback=_DEFAULT_EMBEDDING_DIM
         )
         self.embedding_client = OpenAI(
             api_key=_env("API_KEY"),
@@ -70,7 +74,7 @@ class MemoryOSLocal:
             from pymilvus import DataType
             schema = self.client.create_schema(auto_id=False)
             schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=128)
-            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=_EMBEDDING_DIM)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.embedding_dimension)
             schema.add_field("content", DataType.VARCHAR, max_length=65535, nullable=True)
             schema.add_field("memory_type", DataType.VARCHAR, max_length=32, nullable=True)
             schema.add_field("topic", DataType.VARCHAR, max_length=256, nullable=True)
@@ -88,18 +92,18 @@ class MemoryOSLocal:
             )
         # Preload collection into memory so first search isn't slow (lazy load otherwise)
         try:
-            from src.logger import logger
             t0 = perf_counter()
             self.client.load_collection(collection_name=self.collection_name)
             logger.info(f"[MILVUS] collection '{self.collection_name}' loaded in {perf_counter()-t0:.3f}s")
         except Exception as e:
-            from src.logger import logger
             logger.warning(f"[MILVUS] load_collection failed: {e}")
 
     # ---------- 嵌入 ----------
     def _embed_text(self, text: str) -> List[float]:
         response = self.embedding_client.embeddings.create(
-            model=self.embedding_model_name, input=text
+            model=self.embedding_model_name,
+            input=text,
+            extra_body={"dimensions": self.embedding_dimension},
         )
         return list(response.data[0].embedding)
 
@@ -110,12 +114,13 @@ class MemoryOSLocal:
         metadata: Dict[str, Any],
         embedding_text: Optional[str] = None,
     ) -> None:
+        vector = self._embed_text(embedding_text or content)
         self.client.upsert(
             collection_name=self.collection_name,
             data=[
                 {
                     "id": doc_id,
-                    "vector": self._embed_text(embedding_text or content),
+                    "vector": vector,
                     "content": content,
                     **metadata,
                 }
@@ -131,7 +136,6 @@ class MemoryOSLocal:
             "timestamp": datetime.now().isoformat(),
         }
         self.short_term_memory.append(entry)
-        print(f"[STM] append id={entry['id']} role={role} count={len(self.short_term_memory)} content={content[:80]!r}")
         return entry
 
     def get_recent_messages(self, limit: int = 14) -> List[Dict[str, Any]]:
@@ -141,7 +145,6 @@ class MemoryOSLocal:
         if len(self.short_term_memory) < min_messages:
             return []
 
-        print(f"[MTM] flush start stm_count={len(self.short_term_memory)}")
         memory_id = self.build_mid_term_summary(
             llm,
             summary_source_messages=len(self.short_term_memory)
@@ -183,6 +186,10 @@ class MemoryOSLocal:
 
     def build_mid_term_summary(self, llm, summary_source_messages: int) -> str:
         source_messages = self.short_term_memory[:summary_source_messages]
+        logger.info(
+            "[MEMORY_WRITE_START] type=mid_term "
+            f"source_messages={len(source_messages)} stm_count={len(self.short_term_memory)}"
+        )
         source_message_map = {
             m["id"]: f'{m["role"]}: {m["content"]}' for m in source_messages
         }
@@ -207,7 +214,11 @@ class MemoryOSLocal:
             importance=summary_result.get("importance", "medium"),
         )
         self.short_term_memory = self.short_term_memory[self.summary_prune_messages:]
-        print(f"[MTM] build done id={memory_id} pruned={self.summary_prune_messages} remaining_stm={len(self.short_term_memory)}")
+        logger.info(
+            "[MEMORY_WRITE_DONE] type=mid_term "
+            f"id={memory_id} pruned={self.summary_prune_messages} "
+            f"remaining_stm={len(self.short_term_memory)}"
+        )
         return memory_id
 
     # ---------- 长期记忆 ----------
@@ -247,7 +258,10 @@ class MemoryOSLocal:
             return None
 
         source_mid_terms = mid_terms[-self.long_term_source_summaries:]
-        print("采用当前中期记忆去生成长期记忆" + str(source_mid_terms))
+        logger.info(
+            "[MEMORY_WRITE_START] type=long_term "
+            f"source_mid_terms={len(source_mid_terms)} total_mid_terms={len(mid_terms)}"
+        )
         result = parse_json(
             llm.chat(
                 LONG_TERM_MEMORY_SYSTEM_PROMPT,
@@ -258,17 +272,18 @@ class MemoryOSLocal:
                 ),
             )
         )
-        print("生成的长期记忆结果" + str(result))
         self.last_mid_count = len(mid_terms)
         if not result.get("content"):
             return None
-        return self.add_long_term_memory(
+        memory_id = self.add_long_term_memory(
             content=result.get("content", ""),
             memory_kind=result.get("type", ""),
             confidence=result.get("confidence", 0.0),
             source_summary_ids=[m["id"] for m in source_mid_terms],
             metadata={"mid_term_count": self.last_mid_count},
         )
+        logger.info(f"[MEMORY_WRITE_DONE] type=long_term id={memory_id}")
+        return memory_id
 
     # ---------- 检索 ----------
     def search_memories(
@@ -279,7 +294,6 @@ class MemoryOSLocal:
     ) -> List[Dict[str, Any]]:
         filter_expr = f'memory_type == "{memory_type}"' if memory_type else ""
 
-        mid_term_search_start = perf_counter()
         results = self.client.search(
             collection_name=self.collection_name,
             data=[self._embed_text(query)],
@@ -287,12 +301,6 @@ class MemoryOSLocal:
             filter=filter_expr or None,
             output_fields=["content", "memory_type", "topic", "importance",
                            "created_at", "kind", "confidence"],
-        )
-        mid_term_search_ms = round((perf_counter() - mid_term_search_start) * 1000, 2)
-        print(
-            "[Memory Retrieval Timing] "
-            f"mid_term_search_ms={mid_term_search_ms} s "
-            f"result={results}"
         )
         
         memories = []
