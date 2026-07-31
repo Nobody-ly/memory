@@ -82,6 +82,10 @@ class OpenAICompatibleChatBackend:
         self.max_attempts = max_attempts
         self.enable_thinking = enable_thinking
         self.is_kimi_k2 = model.startswith(("kimi-k2.5", "kimi-k2.6"))
+        self.is_dashscope_qwen = (
+            "dashscope.aliyuncs.com" in base_url.lower()
+            and model.lower().startswith("qwen")
+        )
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -99,14 +103,14 @@ class OpenAICompatibleChatBackend:
     def from_env(
         cls,
         prefix: str = "PERSONAEMP_GENERATOR",
-    ) -> "OpenAICompatibleChatBackend":
+    ) -> OpenAICompatibleChatBackend:
         def env(name: str, fallback: str = "") -> str:
             return os.getenv(f"{prefix}_{name}", fallback).strip()
 
         return cls(
             api_key=env("API_KEY", os.getenv("API_KEY", "")),
             base_url=env("BASE_URL", os.getenv("BASE_URL", "")),
-            model=env("MODEL", "kimi-k2.6"),
+            model=env("MODEL", "qwen3-30b-a3b-instruct-2507"),
             timeout_seconds=float(env("TIMEOUT_SECONDS", "180")),
             max_attempts=int(env("MAX_ATTEMPTS", "6")),
             enable_thinking=env("ENABLE_THINKING", "false").lower()
@@ -155,7 +159,7 @@ class OpenAICompatibleChatBackend:
                     if self.enable_thinking:
                         request["extra_body"] = {"enable_thinking": True}
                 if response_schema is not None:
-                    if self.is_kimi_k2:
+                    if self._uses_required_tool_schema():
                         schema_name = str(response_schema.get("name") or "").strip()
                         schema = response_schema.get("schema")
                         if not schema_name or not isinstance(schema, dict):
@@ -186,7 +190,7 @@ class OpenAICompatibleChatBackend:
 
                 response = self.client.chat.completions.create(**request)
                 message = response.choices[0].message
-                if response_schema is not None and self.is_kimi_k2:
+                if response_schema is not None and self._uses_required_tool_schema():
                     tool_calls = list(message.tool_calls or [])
                     if (
                         len(tool_calls) != 1
@@ -231,3 +235,7 @@ class OpenAICompatibleChatBackend:
         raise RuntimeError(
             f"model call failed after {attempt} attempts: {last_error}"
         ) from last_error
+
+    def _uses_required_tool_schema(self) -> bool:
+        """Use forced tool arguments where provider JSON Schema is not strict."""
+        return self.is_kimi_k2 or getattr(self, "is_dashscope_qwen", False)

@@ -13,12 +13,12 @@
 
 ## 配置生成模型
 
-模型通过环境变量配置。本阶段可用 Kimi 验证流程，正式实验再切换指定模型：
+模型通过环境变量配置。后续生成和 Qwen Judge 统一使用论文指定模型：
 
 ```powershell
 $env:PERSONAEMP_GENERATOR_API_KEY="<local-secret>"
-$env:PERSONAEMP_GENERATOR_BASE_URL="https://api.moonshot.cn/v1"
-$env:PERSONAEMP_GENERATOR_MODEL="kimi-k2.6"
+$env:PERSONAEMP_GENERATOR_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:PERSONAEMP_GENERATOR_MODEL="qwen3-30b-a3b-instruct-2507"
 $env:PERSONAEMP_GENERATOR_ENABLE_THINKING="false"
 ```
 
@@ -61,7 +61,9 @@ python -m src.experiments.personaemp.cli `
 
 ## 官方评审
 
-正式指标为 PersonaEmp 的 Resonation、Expression、Reception 与 Average。固定 criteria 后，分别交给论文指定的 Qwen 与 DeepSeek Judge；当前仓库通过固定官方提交的外部 checkout 调用 evaluator，不改写其评分实现。
+正式指标为 PersonaEmp 的 Resonation、Expression、Reception 与 Average。
+当前先运行论文指定的 Qwen Judge；DeepSeek Judge 暂缓。仓库通过固定官方
+提交的外部 checkout 调用 evaluator，不改写其评分实现。
 
 只有数据 SHA-256 与登记的官方 Table 1 数据指纹一致时，清单才允许标记为可直接比较。论文公开案例或重新生成的数据只能作为流程验证或补充实验。
 
@@ -87,6 +89,6 @@ python -m src.experiments.personaemp.visualize `
 
 图表严格使用官方 1--5 分，不把 Token、耗时或人工判断混入主指标。
 
-在正式 Qwen/DeepSeek 接口尚未配置时，可以用
+在正式 Judge 接口尚未配置时，可以用
 `tools/run_personaemp_pilot_eval.py` 复用官方 Prompt 调试指标链路。
 Pilot 输出必须明确标注为非正式结果，不可写入 Table 1。

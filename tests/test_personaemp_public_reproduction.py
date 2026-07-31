@@ -22,8 +22,8 @@ from src.experiments.personaemp.generation import (
 from src.experiments.personaemp.reconstruction import (
     IntentCache,
     IntentReconstructor,
-    apply_official_model_compatibility,
     adapt_alpsbench,
+    apply_official_model_compatibility,
 )
 from src.experiments.personaemp.report import build_report, paired_user_bootstrap
 from src.experiments.personaemp.splitting import (
@@ -31,7 +31,6 @@ from src.experiments.personaemp.splitting import (
     build_ood_split,
     random_user_split,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "personaemp_paper_case.json"
@@ -191,6 +190,52 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
 
         self.assertEqual(result.content, '{"intents":["Personal Advice"]}')
         self.assertIsNotNone(completions.request)
+        assert completions.request is not None
+        self.assertIn("tools", completions.request)
+        self.assertIn("tool_choice", completions.request)
+        self.assertNotIn("response_format", completions.request)
+
+    def test_dashscope_qwen_structured_output_uses_required_tool_schema(
+        self,
+    ) -> None:
+        completions = FakeCompletions()
+        backend = OpenAICompatibleChatBackend.__new__(
+            OpenAICompatibleChatBackend
+        )
+        backend.model = "qwen3-30b-a3b-instruct-2507"
+        backend.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        backend.max_attempts = 1
+        backend.enable_thinking = False
+        backend.is_kimi_k2 = False
+        backend.is_dashscope_qwen = True
+        backend.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=completions)
+        )
+        schema = {
+            "name": "intent_schema",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "intents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                },
+                "required": ["intents"],
+                "additionalProperties": False,
+            },
+        }
+
+        result = backend.chat(
+            "system",
+            "user",
+            temperature=0.0,
+            max_tokens=100,
+            response_schema=schema,
+        )
+
+        self.assertEqual(result.content, '{"intents":["Personal Advice"]}')
         assert completions.request is not None
         self.assertIn("tools", completions.request)
         self.assertIn("tool_choice", completions.request)

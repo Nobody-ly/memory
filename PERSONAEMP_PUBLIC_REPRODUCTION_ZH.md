@@ -9,7 +9,8 @@
 3. `rag`：与 query 最相关的 Top-3 memory + query。
 4. `ours`：完整 memory + 五层画像 + 现有共情理解、预测和探索。
 
-四种方法使用相同的 Kimi K2.6、共同回复 system prompt 和解码参数。
+四种方法使用相同的 `qwen3-30b-a3b-instruct-2507`、共同回复
+system prompt 和解码参数。
 生成器看不到数据集已有的 persona、situation、category 或
 `relevant_mem`。这些字段只用于官方评价或 RAG 的事后 Recall@3 诊断。
 
@@ -32,8 +33,8 @@ API key 只设置在当前终端环境，不写入 `.env` 或代码：
 
 ```powershell
 $env:PERSONAEMP_GENERATOR_API_KEY="<key>"
-$env:PERSONAEMP_GENERATOR_BASE_URL="https://api.moonshot.cn/v1"
-$env:PERSONAEMP_GENERATOR_MODEL="kimi-k2.6"
+$env:PERSONAEMP_GENERATOR_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:PERSONAEMP_GENERATOR_MODEL="qwen3-30b-a3b-instruct-2507"
 ```
 
 ## 1. 重建公开数据
@@ -53,9 +54,8 @@ python -m src.experiments.personaemp.reconstruction `
 - 生成 `English.public-reconstruction.v1.json` 和重建 manifest；
 - 记录各阶段数量、类别分布、失败原因与产物 SHA256。
 
-Kimi K2.5/2.6 的严格结构化输出使用强制 function tool，其他
-OpenAI-compatible 模型使用 `response_format=json_schema`。两条路径都会
-再做本地字段校验；不会退回只靠 prompt 猜 JSON。
+Qwen 使用百炼 OpenAI-compatible `response_format=json_schema`，
+并在本地再次校验字段；不会退回只靠 prompt 猜 JSON。
 
 仅检查适配结果、不运行官方 query 流水线时使用 `--adapt-only`。
 
@@ -67,13 +67,13 @@ OpenAI-compatible 模型使用 `response_format=json_schema`。两条路径都�
 
 它按公开数据固定顺序只处理前 N 条原始记录，但仍完整经过 intent、
 官方 filter、persona、query、inspection 和 final filter。该参数只用于
-pilot；全量正式重建必须省略。Kimi K2.5/2.6 在官方隔离 worktree 中仅
-增加 non-thinking 传输参数兼容，补丁哈希写入
+pilot；全量正式重建必须省略。模型兼容补丁的哈希写入
 `model_compatibility.json`，不会修改官方 prompt 或实验协议。
 
 ## 2. 生成 Random/OOD 划分
 
-正式 OOD 的 Big Five 标签应使用 DeepSeek-v4-flash：
+正式 OOD 的 Big Five 标签按论文应使用 DeepSeek-v4-flash。该阶段当前
+暂缓，不使用 Qwen 静默替代：
 
 ```powershell
 $env:PERSONAEMP_BIG5_API_KEY="<key>"
@@ -126,16 +126,12 @@ python -m src.experiments.personaemp.official_eval prepare-criteria `
 命令同时生成 criteria manifest，记录模型、官方 commit、数据和 criteria
 的 SHA256。
 
-## 5. 双 Judge 评价
+## 5. Qwen Judge 评价
 
 ```powershell
 $env:PERSONAEMP_QWEN_JUDGE_API_KEY="<key>"
-$env:PERSONAEMP_QWEN_JUDGE_BASE_URL="<url>"
-$env:PERSONAEMP_QWEN_JUDGE_MODEL="Qwen3-30B-A3B-Instruct"
-
-$env:PERSONAEMP_DEEPSEEK_JUDGE_API_KEY="<key>"
-$env:PERSONAEMP_DEEPSEEK_JUDGE_BASE_URL="<url>"
-$env:PERSONAEMP_DEEPSEEK_JUDGE_MODEL="DeepSeek-v4-flash"
+$env:PERSONAEMP_QWEN_JUDGE_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:PERSONAEMP_QWEN_JUDGE_MODEL="qwen3-30b-a3b-instruct-2507"
 
 python -m src.experiments.personaemp.official_eval suite `
   --official-repo D:\codex_workspace\.references\PersonalizedEmpathy-official `
@@ -144,8 +140,7 @@ python -m src.experiments.personaemp.official_eval suite `
   --criteria <split-run>\criteria.json `
   --output-dir data/personaemp_public_reproduction/evaluation `
   --split-name random `
-  --judge Qwen:PERSONAEMP_QWEN_JUDGE `
-  --judge DeepSeek:PERSONAEMP_DEEPSEEK_JUDGE
+  --judge Qwen:PERSONAEMP_QWEN_JUDGE
 ```
 
 OOD 将 `--split-name` 改为 `ood` 并换成 OOD 的运行目录。
@@ -158,18 +153,10 @@ python -m src.experiments.personaemp.report `
   --result random:Qwen:memory=<path> `
   --result random:Qwen:rag=<path> `
   --result random:Qwen:ours=<path> `
-  --result random:DeepSeek:base_model=<path> `
-  --result random:DeepSeek:memory=<path> `
-  --result random:DeepSeek:rag=<path> `
-  --result random:DeepSeek:ours=<path> `
   --result ood:Qwen:base_model=<path> `
   --result ood:Qwen:memory=<path> `
   --result ood:Qwen:rag=<path> `
   --result ood:Qwen:ours=<path> `
-  --result ood:DeepSeek:base_model=<path> `
-  --result ood:DeepSeek:memory=<path> `
-  --result ood:DeepSeek:rag=<path> `
-  --result ood:DeepSeek:ours=<path> `
   --output-dir data/personaemp_public_reproduction/report
 ```
 
