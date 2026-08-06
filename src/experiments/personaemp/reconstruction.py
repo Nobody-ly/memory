@@ -260,9 +260,18 @@ class IntentCache:
 
 
 class IntentReconstructor:
-    def __init__(self, backend: ChatBackend, cache: IntentCache) -> None:
+    def __init__(
+        self,
+        backend: ChatBackend,
+        cache: IntentCache,
+        *,
+        schema_attempts: int = 3,
+    ) -> None:
+        if schema_attempts < 1:
+            raise ValueError("schema_attempts must be positive")
         self.backend = backend
         self.cache = cache
+        self.schema_attempts = schema_attempts
 
     def _cache_identity(
         self,
@@ -291,24 +300,42 @@ class IntentReconstructor:
         cache_key, provenance = self._cache_identity(record)
         if cache_key in self.cache.values:
             return self.cache.values[cache_key]
-        result = self.backend.chat(
-            INTENT_SYSTEM_PROMPT,
-            INTENT_USER_TEMPLATE.format(
-                allowlist="\n".join(f"- {value}" for value in INTENT_ALLOWLIST),
-                conversation=_conversation_text(record),
-            ),
-            temperature=0.0,
-            max_tokens=300,
-            response_schema=INTENT_SCHEMA,
-        )
-        parsed = _parse_json_object(result.content)
-        raw_intents = parsed.get("intents")
-        if not isinstance(raw_intents, list) or not raw_intents:
-            raise ValueError("intent classifier returned no intents")
         allowed = {*INTENT_ALLOWLIST, "Other"}
-        intents = [str(value) for value in raw_intents]
-        if any(value not in allowed for value in intents):
-            raise ValueError("intent classifier returned an unknown intent")
+        last_error: ValueError | None = None
+        intents: list[str] = []
+        for _ in range(self.schema_attempts):
+            result = self.backend.chat(
+                INTENT_SYSTEM_PROMPT,
+                INTENT_USER_TEMPLATE.format(
+                    allowlist="\n".join(
+                        f"- {value}" for value in INTENT_ALLOWLIST
+                    ),
+                    conversation=_conversation_text(record),
+                ),
+                temperature=0.0,
+                max_tokens=300,
+                response_schema=INTENT_SCHEMA,
+            )
+            try:
+                parsed = _parse_json_object(result.content)
+                raw_intents = parsed.get("intents")
+                if not isinstance(raw_intents, list) or not raw_intents:
+                    raise ValueError("intent classifier returned no intents")
+                intents = [str(value) for value in raw_intents]
+                if any(value not in allowed for value in intents):
+                    raise ValueError(
+                        "intent classifier returned an unknown intent"
+                    )
+            except ValueError as exc:
+                last_error = exc
+                continue
+            break
+        else:
+            assert last_error is not None
+            raise ValueError(
+                "intent classifier failed local schema validation after "
+                f"{self.schema_attempts} attempts: {last_error}"
+            ) from last_error
         self.cache.save(
             cache_key,
             benchmark_id,

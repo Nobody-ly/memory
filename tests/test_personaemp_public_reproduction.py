@@ -124,6 +124,32 @@ class StructuredBackend:
         )
 
 
+class InvalidThenValidIntentBackend(StructuredBackend):
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float,
+        max_tokens: int,
+        response_schema: dict[str, Any] | None = None,
+    ) -> ChatResult:
+        self.calls += 1
+        content = (
+            '{"intents":["Unsupported Intent"]}'
+            if self.calls == 1
+            else '{"intents":["Personal Advice"]}'
+        )
+        return ChatResult(
+            content=content,
+            model=self.model,
+            prompt_tokens=10,
+            completion_tokens=5,
+            latency_seconds=0.01,
+            attempts=1,
+        )
+
+
 class FakeCompletions:
     def __init__(self) -> None:
         self.request: dict[str, Any] | None = None
@@ -434,6 +460,24 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
 
         self.assertEqual(first_backend.calls, 1)
         self.assertEqual(second_backend.calls, 1)
+
+    def test_intent_reconstructor_retries_local_schema_failures(self) -> None:
+        record = {
+            "benchmark_id": "bench-1",
+            "input": {
+                "dialogue": [{"role": "user", "text": "I need advice."}]
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            backend = InvalidThenValidIntentBackend("qwen-test")
+            reconstructor = IntentReconstructor(
+                backend,
+                IntentCache(Path(directory) / "intents.jsonl"),
+            )
+            result = reconstructor.classify(record)
+
+        self.assertEqual(result, ["Personal Advice"])
+        self.assertEqual(backend.calls, 2)
 
     def test_kimi_official_compatibility_changes_transport_only(self) -> None:
         source = """resp = await client.chat.completions.create(
