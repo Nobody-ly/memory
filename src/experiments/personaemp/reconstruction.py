@@ -544,8 +544,16 @@ def run_official_pipeline(
             "DATA_RUN_MODE": "full_pipeline",
         }
     )
+    resumable_runner = Path(__file__).with_name(
+        "resumable_official_pipeline.py"
+    )
     subprocess.run(
-        [str(python), "query.py"],
+        [
+            str(python),
+            str(resumable_runner),
+            "--prepare-dir",
+            str(prepare_dir),
+        ],
         cwd=prepare_dir,
         env=process_env,
         check=True,

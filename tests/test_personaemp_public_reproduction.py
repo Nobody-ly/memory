@@ -26,6 +26,10 @@ from src.experiments.personaemp.reconstruction import (
     apply_official_model_compatibility,
 )
 from src.experiments.personaemp.report import build_report, paired_user_bootstrap
+from src.experiments.personaemp.resumable_official_pipeline import (
+    _run_generation,
+    _run_inspection,
+)
 from src.experiments.personaemp.splitting import (
     TRAITS,
     build_ood_split,
@@ -150,7 +154,127 @@ class FakeCompletions:
         )
 
 
+class FakeOfficialPipeline:
+    MODEL_NAME = "fake-model"
+
+    def __init__(self, root: Path) -> None:
+        self.STAGE_DEBUG_FILE = str(root / "stage_debug.json")
+        self.generation_calls = 0
+        self.inspection_calls = 0
+
+    def query_generation(
+        self,
+        *,
+        start_index: int,
+        end_index: int,
+        batch_size: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        self.generation_calls += 1
+        generated = [
+            {
+                "source_file": "fixture.json",
+                "record": {"line_index": index},
+                "queries": [{"query": f"query-{index}"}],
+                "generation_usage": {"total_tokens": 1},
+            }
+            for index in range(start_index, end_index)
+        ]
+        Path(self.STAGE_DEBUG_FILE).write_text(
+            json.dumps(
+                [
+                    {"record_id": index}
+                    for index in range(start_index, end_index)
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return generated, [
+            {"stage": "generation", "record_id": index}
+            for index in range(start_index, end_index)
+        ]
+
+    def query_inspection(
+        self,
+        generated: list[dict[str, Any]],
+        generation_usage: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        self.inspection_calls += 1
+        inspected = [
+            {
+                "source_file": row["source_file"],
+                "record_id": row["record"]["line_index"],
+                "queries_inspected": [{"query_index": 0}],
+            }
+            for row in generated
+        ]
+        return inspected, {
+            "inspection_calls": [
+                {
+                    "stage": "inspection",
+                    "record_id": row["record"]["line_index"],
+                }
+                for row in generated
+            ]
+        }
+
+
 class PersonaEmpPublicReproductionTests(unittest.TestCase):
+    def test_official_pipeline_chunks_resume_without_repeating_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = FakeOfficialPipeline(root)
+            first_generated, first_generation_usage, first_debug = _run_generation(
+                module,
+                total_records=5,
+                chunk_size=2,
+                resume_dir=root / "resume",
+                source_sha256="source-hash",
+                model=module.MODEL_NAME,
+            )
+            first_inspected, first_inspection_usage = _run_inspection(
+                module,
+                generated=first_generated,
+                generation_usage=first_generation_usage,
+                chunk_size=2,
+                resume_dir=root / "resume",
+                source_sha256="source-hash",
+                model=module.MODEL_NAME,
+            )
+            generation_calls = module.generation_calls
+            inspection_calls = module.inspection_calls
+
+            second_generated, second_generation_usage, second_debug = _run_generation(
+                module,
+                total_records=5,
+                chunk_size=2,
+                resume_dir=root / "resume",
+                source_sha256="source-hash",
+                model=module.MODEL_NAME,
+            )
+            second_inspected, second_inspection_usage = _run_inspection(
+                module,
+                generated=second_generated,
+                generation_usage=second_generation_usage,
+                chunk_size=2,
+                resume_dir=root / "resume",
+                source_sha256="source-hash",
+                model=module.MODEL_NAME,
+            )
+
+        self.assertEqual(generation_calls, 3)
+        self.assertEqual(inspection_calls, 3)
+        self.assertEqual(module.generation_calls, generation_calls)
+        self.assertEqual(module.inspection_calls, inspection_calls)
+        self.assertEqual(first_generated, second_generated)
+        self.assertEqual(first_generation_usage, second_generation_usage)
+        self.assertEqual(first_debug, second_debug)
+        self.assertEqual(first_inspected, second_inspected)
+        self.assertEqual(first_inspection_usage, second_inspection_usage)
+        self.assertEqual(
+            [row["record"]["line_index"] for row in second_generated],
+            [0, 1, 2, 3, 4],
+        )
+
     def test_kimi_structured_output_uses_required_tool_schema(self) -> None:
         completions = FakeCompletions()
         backend = OpenAICompatibleChatBackend.__new__(
