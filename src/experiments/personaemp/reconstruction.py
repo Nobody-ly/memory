@@ -593,7 +593,9 @@ def run_official_pipeline(
 ) -> Path:
     repository = repository.resolve()
     output_dir = output_dir.resolve()
-    python = python.resolve()
+    # Keep a virtual-environment interpreter path intact. Resolving a uv venv
+    # symlink points at the managed base interpreter and drops its site-packages.
+    python = python.absolute()
     verify_official_checkout(repository)
     scratch = output_dir / "official_pipeline_worktree"
     archive = output_dir / "official_pipeline.tar"
