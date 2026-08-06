@@ -150,6 +150,27 @@ class InvalidThenValidIntentBackend(StructuredBackend):
         )
 
 
+class FakeContentPolicyError(RuntimeError):
+    status_code = 400
+
+
+class ContentRejectedBackend(StructuredBackend):
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float,
+        max_tokens: int,
+        response_schema: dict[str, Any] | None = None,
+    ) -> ChatResult:
+        self.calls += 1
+        provider_error = FakeContentPolicyError(
+            "data_inspection_failed: inappropriate content"
+        )
+        raise RuntimeError("model call failed") from provider_error
+
+
 class FakeCompletions:
     def __init__(self) -> None:
         self.request: dict[str, Any] | None = None
@@ -478,6 +499,57 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
 
         self.assertEqual(result, ["Personal Advice"])
         self.assertEqual(backend.calls, 2)
+
+    def test_content_rejection_is_cached_and_traceably_skipped(self) -> None:
+        input_row = {
+            "benchmark_id": "blocked-1",
+            "task": "task1",
+            "session_id": "session-1",
+            "input": {
+                "line_index": 7,
+                "sessions": [{"session_id": "session-1", "turns": []}],
+                "dialogue": [{"role": "user", "text": "blocked input"}],
+            },
+        }
+        reference_row = {
+            "benchmark_id": "blocked-1",
+            "gold": {
+                "memory_items": [{"label": "State", "value": "value"}]
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "input.jsonl"
+            reference_path = root / "reference.jsonl"
+            input_path.write_text(json.dumps(input_row) + "\n", encoding="utf-8")
+            reference_path.write_text(
+                json.dumps(reference_row) + "\n",
+                encoding="utf-8",
+            )
+            backend = ContentRejectedBackend("qwen-test")
+            cache = IntentCache(root / "intents.jsonl")
+            classifier = IntentReconstructor(backend, cache)
+            failures: list[dict[str, str]] = []
+            records, stats = adapt_alpsbench(
+                [(input_path, reference_path)],
+                classifier,
+                intent_failures=failures,
+            )
+            second_records, second_stats = adapt_alpsbench(
+                [(input_path, reference_path)],
+                classifier,
+            )
+
+        self.assertEqual(records, [])
+        self.assertEqual(second_records, [])
+        self.assertEqual(stats.intent_content_rejections, 1)
+        self.assertEqual(second_stats.intent_content_rejections, 1)
+        self.assertEqual(backend.calls, 1)
+        self.assertEqual(failures[0]["benchmark_id"], "blocked-1")
+        self.assertEqual(
+            failures[0]["reason_code"],
+            "provider_data_inspection_failed",
+        )
 
     def test_kimi_official_compatibility_changes_transport_only(self) -> None:
         source = """resp = await client.chat.completions.create(

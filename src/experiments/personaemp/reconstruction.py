@@ -220,12 +220,37 @@ class ReconstructionStats:
     joined_rows: int
     missing_references: int
     memory_items: int
+    intent_content_rejections: int
+
+
+class IntentContentRejectedError(RuntimeError):
+    """Raised only for an explicit provider-side content policy rejection."""
+
+
+def _content_rejection_code(exc: Exception) -> str | None:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        status_code = getattr(current, "status_code", None)
+        response = getattr(current, "response", None)
+        if status_code is None:
+            status_code = getattr(response, "status_code", None)
+        message = str(current).lower()
+        if int(status_code or 0) == 400 and (
+            "data_inspection_failed" in message
+            or "inappropriate content" in message
+        ):
+            return "provider_data_inspection_failed"
+        current = current.__cause__ or current.__context__
+    return None
 
 
 class IntentCache:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.values: dict[str, list[str]] = {}
+        self.rejections: dict[str, str] = {}
         if path.is_file():
             with path.open("r", encoding="utf-8") as source:
                 for line in source:
@@ -233,7 +258,12 @@ class IntentCache:
                         continue
                     value = json.loads(line)
                     cache_key = str(value.get("cache_key") or "")
-                    if cache_key:
+                    if cache_key and value.get("status") == "content_rejected":
+                        self.rejections[cache_key] = str(
+                            value.get("reason_code")
+                            or "provider_data_inspection_failed"
+                        )
+                    elif cache_key:
                         self.values[cache_key] = list(value["intents"])
 
     def save(
@@ -257,6 +287,29 @@ class IntentCache:
             destination.flush()
             os.fsync(destination.fileno())
         self.values[cache_key] = intents
+
+    def save_rejection(
+        self,
+        cache_key: str,
+        benchmark_id: str,
+        reason_code: str,
+        provenance: dict[str, str],
+    ) -> None:
+        if cache_key in self.rejections:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "cache_key": cache_key,
+            "benchmark_id": benchmark_id,
+            "status": "content_rejected",
+            "reason_code": reason_code,
+            "provenance": provenance,
+        }
+        with self.path.open("a", encoding="utf-8", newline="\n") as destination:
+            destination.write(json.dumps(row, ensure_ascii=False) + "\n")
+            destination.flush()
+            os.fsync(destination.fileno())
+        self.rejections[cache_key] = reason_code
 
 
 class IntentReconstructor:
@@ -300,22 +353,36 @@ class IntentReconstructor:
         cache_key, provenance = self._cache_identity(record)
         if cache_key in self.cache.values:
             return self.cache.values[cache_key]
+        if cache_key in self.cache.rejections:
+            raise IntentContentRejectedError(self.cache.rejections[cache_key])
         allowed = {*INTENT_ALLOWLIST, "Other"}
         last_error: ValueError | None = None
         intents: list[str] = []
         for _ in range(self.schema_attempts):
-            result = self.backend.chat(
-                INTENT_SYSTEM_PROMPT,
-                INTENT_USER_TEMPLATE.format(
-                    allowlist="\n".join(
-                        f"- {value}" for value in INTENT_ALLOWLIST
+            try:
+                result = self.backend.chat(
+                    INTENT_SYSTEM_PROMPT,
+                    INTENT_USER_TEMPLATE.format(
+                        allowlist="\n".join(
+                            f"- {value}" for value in INTENT_ALLOWLIST
+                        ),
+                        conversation=_conversation_text(record),
                     ),
-                    conversation=_conversation_text(record),
-                ),
-                temperature=0.0,
-                max_tokens=300,
-                response_schema=INTENT_SCHEMA,
-            )
+                    temperature=0.0,
+                    max_tokens=300,
+                    response_schema=INTENT_SCHEMA,
+                )
+            except Exception as exc:
+                reason_code = _content_rejection_code(exc)
+                if reason_code is None:
+                    raise
+                self.cache.save_rejection(
+                    cache_key,
+                    benchmark_id,
+                    reason_code,
+                    provenance,
+                )
+                raise IntentContentRejectedError(reason_code) from exc
             try:
                 parsed = _parse_json_object(result.content)
                 raw_intents = parsed.get("intents")
@@ -350,11 +417,13 @@ def adapt_alpsbench(
     classifier: IntentReconstructor,
     *,
     source_limit: int | None = None,
+    intent_failures: list[dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], ReconstructionStats]:
     if source_limit is not None and source_limit <= 0:
         raise ValueError("source_limit must be a positive integer")
     output: list[dict[str, Any]] = []
     input_rows = joined_rows = missing_references = memory_items = 0
+    intent_content_rejections = 0
     seen: set[str] = set()
     for input_path, reference_path in pairs:
         references = {
@@ -380,7 +449,19 @@ def adapt_alpsbench(
             source_input = row.get("input") or {}
             sessions = source_input.get("sessions") or []
             dialogue = source_input.get("dialogue") or []
-            intents = classifier.classify(row)
+            try:
+                intents = classifier.classify(row)
+            except IntentContentRejectedError as exc:
+                intent_content_rejections += 1
+                if intent_failures is not None:
+                    intent_failures.append(
+                        {
+                            "benchmark_id": benchmark_id,
+                            "stage": "intent_reconstruction",
+                            "reason_code": str(exc),
+                        }
+                    )
+                continue
             output.append(
                 {
                     "benchmark_id": benchmark_id,
@@ -412,6 +493,7 @@ def adapt_alpsbench(
         joined_rows=joined_rows,
         missing_references=missing_references,
         memory_items=memory_items,
+        intent_content_rejections=intent_content_rejections,
     )
 
 
@@ -629,10 +711,21 @@ def main() -> int:
         backend,
         IntentCache(output_dir / "cache" / "intents.jsonl"),
     )
+    intent_failures: list[dict[str, str]] = []
     records, stats = adapt_alpsbench(
         pairs,
         classifier,
         source_limit=args.source_limit,
+        intent_failures=intent_failures,
+    )
+    intent_failures_path = output_dir / "intent_failures.jsonl"
+    intent_failures_path.parent.mkdir(parents=True, exist_ok=True)
+    intent_failures_path.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False) + "\n"
+            for row in intent_failures
+        ),
+        encoding="utf-8",
     )
     adapted_path = output_dir / "by_label_json" / "public_reconstruction.json"
     adapted_path.parent.mkdir(parents=True, exist_ok=True)
@@ -672,6 +765,10 @@ def main() -> int:
             ),
         },
         "stats": asdict(stats),
+        "intent_failures": {
+            "path": str(intent_failures_path),
+            "sha256": _sha256(intent_failures_path),
+        },
         "source_limit": args.source_limit,
         "adapted_records": len(records),
         "adapted_path": str(adapted_path),
