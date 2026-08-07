@@ -12,6 +12,7 @@ from typing import Any, Iterable
 from .dataset import PersonaEmpDataset, PersonaEmpSample
 from .generation import (
     BASE_MODEL_USER_PROMPT,
+    ALIGNMENT_RESPONSE_SCHEMA,
     EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
     EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE,
     MEMORY_RESPONSE_USER_PROMPT,
@@ -21,6 +22,7 @@ from .generation import (
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
+    PROFILE_RESPONSE_SCHEMA,
     RAG_RESPONSE_USER_PROMPT,
     RAG_ENCODER_MODEL,
     RAG_ENCODER_REVISION,
@@ -89,11 +91,17 @@ def _generation_prompt_hashes() -> dict[str, str]:
         "profile_extraction_user_template": prompt_hash(
             PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE
         ),
+        "profile_response_schema": prompt_hash(
+            json.dumps(PROFILE_RESPONSE_SCHEMA, sort_keys=True)
+        ),
         "empathy_alignment_system": prompt_hash(
             EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT
         ),
         "empathy_alignment_user_template": prompt_hash(
             EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE
+        ),
+        "empathy_alignment_response_schema": prompt_hash(
+            json.dumps(ALIGNMENT_RESPONSE_SCHEMA, sort_keys=True)
         ),
     }
 

@@ -34,6 +34,44 @@ Respond under all of these requirements:
 RESPONSE_MAX_TOKENS = 350
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
+PROFILE_RESPONSE_SCHEMA = {
+    "name": "five_layer_profile",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            layer: {"type": "object", "additionalProperties": True}
+            for layer in PROFILE_LAYERS
+        },
+        "required": list(PROFILE_LAYERS),
+        "additionalProperties": False,
+    },
+}
+ALIGNMENT_RESPONSE_SCHEMA = {
+    "name": "deep_empathy_alignment",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            field: {"type": "object", "additionalProperties": True}
+            for field in (
+                "understanding",
+                "prediction",
+                "exploration",
+                "alignment",
+                "empathy_state",
+            )
+        },
+        "required": [
+            "understanding",
+            "prediction",
+            "exploration",
+            "alignment",
+            "empathy_state",
+        ],
+        "additionalProperties": False,
+    },
+}
 BASE_MODEL_USER_PROMPT = """You will be provided with memories extracted from previous dialogue.
 Use them as background evidence and generate the final response.
 
@@ -324,6 +362,7 @@ class ProfileBuilder:
             "model": self.backend.model,
             "system_prompt_hash": prompt_hash(PROFILE_EXTRACTION_SYSTEM_PROMPT),
             "user_prompt_hash": prompt_hash(PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE),
+            "response_schema": PROFILE_RESPONSE_SCHEMA,
         }
         return hashlib.sha256(
             json.dumps(
@@ -355,6 +394,7 @@ class ProfileBuilder:
                 user_prompt,
                 temperature=0.2,
                 max_tokens=3000,
+                response_schema=PROFILE_RESPONSE_SCHEMA,
             )
             logical_results.append(result)
             try:
@@ -667,6 +707,7 @@ class DeepEmpathyGenerator:
                 user_prompt,
                 temperature=0.2,
                 max_tokens=1800,
+                response_schema=ALIGNMENT_RESPONSE_SCHEMA,
             )
             logical_results.append(result)
             try:

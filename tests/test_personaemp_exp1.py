@@ -52,6 +52,7 @@ class FakeBackend:
         *,
         temperature: float,
         max_tokens: int,
+        response_schema: dict[str, object] | None = None,
     ) -> ChatResult:
         self.calls.append(
             {
@@ -59,6 +60,7 @@ class FakeBackend:
                 "user": user_prompt,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
+                "response_schema": response_schema,
             }
         )
         if "extracting user profiles" in system_prompt:
@@ -296,6 +298,24 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             if "extracting user profiles" in str(call["system"])
         )
         self.assertIn("Extracted long-term memory evidence", profile_prompt)
+        profile_call = next(
+            call
+            for call in backend.calls
+            if "extracting user profiles" in str(call["system"])
+        )
+        alignment_call = next(
+            call
+            for call in backend.calls
+            if "empathy alignment reasoning module" in str(call["system"])
+        )
+        self.assertEqual(
+            profile_call["response_schema"]["schema"]["required"],
+            ["core", "regulation", "cognition", "identity", "behavior"],
+        )
+        self.assertIn(
+            "empathy_state",
+            alignment_call["response_schema"]["schema"]["required"],
+        )
         forbidden_values = (
             sample.persona_text,
             sample.scenario,
