@@ -14,12 +14,13 @@ from .generation import (
     BASE_MODEL_USER_PROMPT,
     ALIGNMENT_RESPONSE_SCHEMA,
     ALIGNMENT_MAX_TOKENS,
-    EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
     EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE,
     MEMORY_RESPONSE_USER_PROMPT,
     MEMORY_SUMMARY_SYSTEM_PROMPT,
     MEMORY_SUMMARY_USER_PROMPT,
     OURS_USER_PROMPT,
+    PERSONAEMP_AGENT_PERSONA_DISABLED,
+    PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
@@ -82,6 +83,13 @@ def _generation_prompt_hashes() -> dict[str, str]:
         "shared_response_system": prompt_hash(
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT
         ),
+        "disabled_agent_persona_input": prompt_hash(
+            json.dumps(
+                PERSONAEMP_AGENT_PERSONA_DISABLED,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        ),
         "ours_user_template": prompt_hash(OURS_USER_PROMPT),
         "base_user_template": prompt_hash(BASE_MODEL_USER_PROMPT),
         "memory_summary_system": prompt_hash(MEMORY_SUMMARY_SYSTEM_PROMPT),
@@ -99,7 +107,7 @@ def _generation_prompt_hashes() -> dict[str, str]:
         ),
         "profile_max_tokens": prompt_hash(str(PROFILE_MAX_TOKENS)),
         "empathy_alignment_system": prompt_hash(
-            EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT
+            PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT
         ),
         "empathy_alignment_user_template": prompt_hash(
             EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE
@@ -400,7 +408,7 @@ class PersonaEmpRunner:
                 "paper": "arXiv:2606.00728v1",
             },
             "generation": {
-                "protocol_version": "personaemp_benchmark_adapter_v2",
+                "protocol_version": "personaemp_benchmark_adapter_v4",
                 "model": self.config.generator_model,
                 "base_url": self.config.generator_base_url,
                 "enable_thinking": self.config.generator_enable_thinking,
@@ -437,15 +445,25 @@ class PersonaEmpRunner:
                     "dataset_persona_visible_to_generators": False,
                     "dataset_persona_visible_to_official_judges": True,
                     "external_agent_persona_visible_to_generators": False,
+                    "agent_persona_visible_to_ours_alignment": False,
                 },
                 "response_contract": {
                     "shared_by_all_methods": True,
                     "same_language_as_query": True,
-                    "paragraphs": 1,
-                    "sentences": "exactly_2_to_4",
+                    "paragraphs": "unrestricted",
+                    "sentences": "unrestricted",
+                    "brevity_instruction": False,
                     "direct_help_before_optional_question": True,
                     "maximum_follow_up_questions": 1,
                     "max_tokens": 350,
+                },
+                "personaemp_alignment_adapter": {
+                    "agent_persona_mode": "disabled",
+                    "individual_agent_persona_generated": False,
+                    "self_domain_mode": "disabled_user_domain_only",
+                    "current_state_inherited_across_queries": False,
+                    "temporal_omega_decay_enabled": False,
+                    "omega_uses_profile_completeness": True,
                 },
                 "structured_stage_limits": {
                     "profile_max_tokens": PROFILE_MAX_TOKENS,

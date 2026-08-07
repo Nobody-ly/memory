@@ -16,6 +16,7 @@ from src.experiments.personaemp.dataset import (
     PersonaEmpDatasetError,
 )
 from src.experiments.personaemp.generation import (
+    PERSONAEMP_AGENT_PERSONA_DISABLED,
     RESPONSE_MAX_TOKENS,
     PROFILE_MAX_TOKENS,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
@@ -299,10 +300,9 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             base_call["system"],
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
         )
-        self.assertIn(
-            "exactly one paragraph containing 2 to 4",
-            str(ours_call["system"]),
-        )
+        self.assertNotIn("concise", str(ours_call["system"]).lower())
+        self.assertNotIn("sentence", str(ours_call["system"]).lower())
+        self.assertNotIn("paragraph", str(ours_call["system"]).lower())
         self.assertIn(
             "actionable suggestion or example phrase",
             str(base_call["system"]),
@@ -340,6 +340,20 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         self.assertIn(
             "empathy_state",
             alignment_call["response_schema"]["schema"]["required"],
+        )
+        self.assertIn(
+            PERSONAEMP_AGENT_PERSONA_DISABLED["instruction"],
+            str(alignment_call["user"]),
+        )
+        self.assertIn(
+            "Agent Persona and Self Domain are disabled",
+            str(alignment_call["system"]),
+        )
+        self.assertNotIn("AGENT PERSONA:\n{}", str(alignment_call["user"]))
+        self.assertEqual(output.omega, 0.875)
+        self.assertEqual(
+            output.qualitative_artifacts["understanding"]["self_domain"],
+            {"status": "disabled"},
         )
         forbidden_values = (
             sample.persona_text,
@@ -407,6 +421,20 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         self.assertEqual(len(predictions[0]["responses"]), 1)
         self.assertFalse(
             manifest["dataset"]["table1_direct_comparison_allowed"]
+        )
+        self.assertEqual(
+            manifest["generation"]["protocol_version"],
+            "personaemp_benchmark_adapter_v4",
+        )
+        self.assertFalse(
+            manifest["generation"]["response_contract"][
+                "brevity_instruction"
+            ]
+        )
+        self.assertFalse(
+            manifest["generation"]["personaemp_alignment_adapter"][
+                "temporal_omega_decay_enabled"
+            ]
         )
         self.assertEqual(cached_profile["format_version"], 2)
         self.assertEqual(

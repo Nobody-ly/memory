@@ -24,12 +24,34 @@ PERSONAEMP_RESPONSE_SYSTEM_PROMPT = """You are a warm, empathetic conversation p
 Respond under all of these requirements:
 1. Use the same language as the user's query.
 2. Directly address the user's current need. When the user asks for advice, a decision, wording, or practical help, give at least one actionable suggestion or example phrase before any optional follow-up question.
-3. Write exactly one paragraph containing 2 to 4 concise, natural sentences.
-4. Validate the user's feelings when appropriate, without sounding clinical, formal, or patronizing.
-5. Personalize only from the evidence provided. Do not mention memories, profiles, hidden context, or how the response was generated.
-6. Do not invent user facts and do not describe yourself as an AI.
-7. Ask at most one follow-up question.
-8. Output only the final response."""
+3. Validate the user's feelings when appropriate, without sounding clinical, formal, or patronizing.
+4. Personalize only from the evidence provided. Do not mention memories, profiles, hidden context, or how the response was generated.
+5. Do not invent user facts and do not describe yourself as an AI.
+6. Ask at most one follow-up question.
+7. Output only the final response."""
+
+# PersonaEmp exposes user memory but no agent-side interaction history. Agent
+# persona and Self Domain are therefore disabled only in this benchmark
+# adapter; the production Deep Empathy prompt remains unchanged.
+PERSONAEMP_AGENT_PERSONA_DISABLED = {
+    "status": "disabled",
+    "reason": "PersonaEmp provides no agent-side persona evidence.",
+    "instruction": (
+        "Do not infer agent traits or use a personalized Self Domain. "
+        "Reason from the User Domain only."
+    ),
+}
+PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT = (
+    EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT
+    + """
+
+PERSONAEMP BENCHMARK ADAPTER OVERRIDE:
+- Agent Persona and Self Domain are disabled because this benchmark provides no agent-side history.
+- Do not infer or fabricate agent traits, emotional capacity, natural tone, relationship dynamics, or a personalized self model.
+- Base understanding, prediction, exploration, alignment, and empathy-state decisions only on the User Domain, the current query, and supplied user memory/profile evidence.
+- In the required JSON, set understanding.self_domain to {"status": "disabled"}. Treat alignment as direct user-domain calibration rather than adjustment from an agent persona.
+"""
+)
 
 RESPONSE_MAX_TOKENS = 350
 PROFILE_MAX_TOKENS = 6000
@@ -769,7 +791,11 @@ class DeepEmpathyGenerator:
                 flatten_static_profile(profile),
                 ensure_ascii=False,
             ),
-            agent_persona="{}",
+            agent_persona=json.dumps(
+                PERSONAEMP_AGENT_PERSONA_DISABLED,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
             current_state="{}",
             epistemic_omega=omega,
         )
@@ -778,7 +804,7 @@ class DeepEmpathyGenerator:
         logical_results: list[ChatResult] = []
         for _ in range(self.schema_attempts):
             result = self.backend.chat(
-                EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
+                PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT,
                 user_prompt,
                 temperature=0.2,
                 max_tokens=ALIGNMENT_MAX_TOKENS,
@@ -793,6 +819,17 @@ class DeepEmpathyGenerator:
                     raise ValueError("alignment.prediction must be an object")
                 if not isinstance(alignment.get("exploration"), dict):
                     raise ValueError("alignment.exploration must be an object")
+                understanding = alignment.setdefault("understanding", {})
+                if not isinstance(understanding, dict):
+                    raise ValueError("alignment.understanding must be an object")
+                understanding["self_domain"] = {"status": "disabled"}
+                alignment["alignment"] = {
+                    "mode": "user_domain_only",
+                    "agent_persona_used": False,
+                    "instruction": (
+                        "Calibrate the response directly to the User Domain."
+                    ),
+                }
                 return alignment, StageUsage.combine(logical_results)
             except (ValueError, json.JSONDecodeError) as exc:
                 last_error = exc
@@ -804,8 +841,10 @@ class DeepEmpathyGenerator:
 
     def generate(self, sample: PersonaEmpSample) -> GenerationOutput:
         profile, profile_usage = self.profile_builder.build(sample)
-        interaction_count = len(sample.memory_items)
-        omega = compute_omega(interaction_count, profile)
+        # PersonaEmp supplies memory evidence but no reliable interaction-turn
+        # count. Keep adaptive exploration based on profile completeness while
+        # disabling an unsupported temporal-decay input for this benchmark.
+        omega = compute_omega(interaction_count=0, static_profile=profile)
         alignment, alignment_usage = self._alignment(sample, profile, omega)
 
         response_prompt = OURS_USER_PROMPT.format(
