@@ -31,6 +31,7 @@ from src.experiments.personaemp.runner import (
     RunConfiguration,
 )
 from src.experiments.personaemp.official_eval import (
+    _completed_judge_output,
     summarize_official_results,
     validate_criteria_alignment,
     validate_prediction_alignment,
@@ -423,6 +424,50 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
 
 
 class OfficialEvaluationAdapterTests(unittest.TestCase):
+    def test_completed_judge_output_requires_matching_protocol_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.json"
+            output.write_text("[]", encoding="utf-8")
+            input_hashes = {
+                "dataset_sha256": "dataset",
+                "predictions_sha256": "predictions",
+                "criteria_sha256": "criteria",
+                "results_sha256": "results",
+            }
+            output.with_suffix(".summary.json").write_text(
+                json.dumps(
+                    {
+                        "records": 1,
+                        "valid_scores": {
+                            "resonation": 1,
+                            "expression": 1,
+                            "reception": 1,
+                        },
+                        "invalid_scores": [],
+                        "judge_model": "judge-model",
+                        "inputs": input_hashes,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(
+                _completed_judge_output(
+                    output,
+                    expected_records=1,
+                    judge_model="judge-model",
+                    input_hashes=input_hashes,
+                )
+            )
+            self.assertFalse(
+                _completed_judge_output(
+                    output,
+                    expected_records=2,
+                    judge_model="judge-model",
+                    input_hashes=input_hashes,
+                )
+            )
+
     def test_rejects_misaligned_or_incomplete_criteria(self) -> None:
         dataset = PersonaEmpDataset.load(FIXTURE)
         criteria = [

@@ -182,6 +182,37 @@ def summarize_official_results(results_path: Path) -> dict[str, Any]:
     }
 
 
+def _completed_judge_output(
+    output: Path,
+    *,
+    expected_records: int,
+    judge_model: str,
+    input_hashes: dict[str, str],
+) -> bool:
+    summary_path = output.with_suffix(".summary.json")
+    if not output.is_file() or not summary_path.is_file():
+        return False
+    try:
+        summary = load_json(summary_path)
+        if not isinstance(summary, dict):
+            return False
+        if int(summary.get("records", -1)) != expected_records:
+            return False
+        if summary.get("judge_model") != judge_model:
+            return False
+        if summary.get("inputs") != input_hashes:
+            return False
+        if summary.get("invalid_scores"):
+            return False
+        valid_scores = summary.get("valid_scores") or {}
+        return all(
+            int(valid_scores.get(dimension, -1)) == expected_records
+            for dimension in DIMENSIONS
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def _git_head(repository: Path) -> str:
     result = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
@@ -293,9 +324,26 @@ def run_prepare_criteria(args: argparse.Namespace) -> None:
 def run_judge(args: argparse.Namespace) -> None:
     repository = args.official_repo.resolve()
     verify_official_checkout(repository)
-    validate_prediction_alignment(args.dataset, args.predictions)
+    _session_count, query_count = validate_prediction_alignment(
+        args.dataset,
+        args.predictions,
+    )
     validate_criteria_alignment(args.dataset, args.criteria, args.limit)
     environment = _api_environment(args.env_prefix, "EVAL")
+    expected_records = min(args.limit, query_count) if args.limit else query_count
+    input_hashes = {
+        "dataset_sha256": _sha256(args.dataset),
+        "predictions_sha256": _sha256(args.predictions),
+        "criteria_sha256": _sha256(args.criteria),
+        "results_sha256": _sha256(args.output) if args.output.is_file() else "",
+    }
+    if getattr(args, "resume", False) and _completed_judge_output(
+        args.output,
+        expected_records=expected_records,
+        judge_model=environment["EVAL_MODEL"],
+        input_hashes=input_hashes,
+    ):
+        return
     command = [
         str(args.python),
         str(repository / "evaluation" / "eval.py"),
@@ -385,6 +433,7 @@ def run_suite(args: argparse.Namespace) -> None:
                     concurrency=args.concurrency,
                     temperature=args.temperature,
                     limit=args.limit,
+                    resume=args.resume,
                 )
             )
             judge_outputs[method] = str(output)
@@ -442,6 +491,7 @@ def _parser() -> argparse.ArgumentParser:
     judge.add_argument("--concurrency", type=int, default=8)
     judge.add_argument("--temperature", type=float, default=0.3)
     judge.add_argument("--limit", type=int, default=None)
+    judge.add_argument("--resume", action="store_true")
     judge.set_defaults(handler=run_judge)
 
     suite = subparsers.add_parser("suite")
@@ -461,6 +511,7 @@ def _parser() -> argparse.ArgumentParser:
     suite.add_argument("--concurrency", type=int, default=8)
     suite.add_argument("--temperature", type=float, default=0.3)
     suite.add_argument("--limit", type=int, default=None)
+    suite.add_argument("--resume", action="store_true")
     suite.set_defaults(handler=run_suite)
     return parser
 
