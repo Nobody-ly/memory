@@ -13,6 +13,7 @@ from .dataset import PersonaEmpDataset, PersonaEmpSample
 from .generation import (
     BASE_MODEL_USER_PROMPT,
     ALIGNMENT_RESPONSE_SCHEMA,
+    ALIGNMENT_MAX_TOKENS,
     EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
     EMPATHY_ALIGNMENT_REASONING_USER_PROMPT_TEMPLATE,
     MEMORY_RESPONSE_USER_PROMPT,
@@ -22,6 +23,7 @@ from .generation import (
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
+    PROFILE_MAX_TOKENS,
     PROFILE_RESPONSE_SCHEMA,
     RAG_RESPONSE_USER_PROMPT,
     RAG_ENCODER_MODEL,
@@ -94,6 +96,7 @@ def _generation_prompt_hashes() -> dict[str, str]:
         "profile_response_schema": prompt_hash(
             json.dumps(PROFILE_RESPONSE_SCHEMA, sort_keys=True)
         ),
+        "profile_max_tokens": prompt_hash(str(PROFILE_MAX_TOKENS)),
         "empathy_alignment_system": prompt_hash(
             EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT
         ),
@@ -102,6 +105,9 @@ def _generation_prompt_hashes() -> dict[str, str]:
         ),
         "empathy_alignment_response_schema": prompt_hash(
             json.dumps(ALIGNMENT_RESPONSE_SCHEMA, sort_keys=True)
+        ),
+        "empathy_alignment_max_tokens": prompt_hash(
+            str(ALIGNMENT_MAX_TOKENS)
         ),
     }
 
@@ -436,6 +442,10 @@ class PersonaEmpRunner:
                     "direct_help_before_optional_question": True,
                     "maximum_follow_up_questions": 1,
                     "max_tokens": 350,
+                },
+                "structured_stage_limits": {
+                    "profile_max_tokens": PROFILE_MAX_TOKENS,
+                    "alignment_max_tokens": ALIGNMENT_MAX_TOKENS,
                 },
                 "core_prompt_policy": (
                     "production_core_prompts_unchanged; "

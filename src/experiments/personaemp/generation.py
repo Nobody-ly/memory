@@ -32,6 +32,8 @@ Respond under all of these requirements:
 8. Output only the final response."""
 
 RESPONSE_MAX_TOKENS = 350
+PROFILE_MAX_TOKENS = 6000
+ALIGNMENT_MAX_TOKENS = 1800
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 PROFILE_RESPONSE_SCHEMA = {
@@ -363,6 +365,7 @@ class ProfileBuilder:
             "system_prompt_hash": prompt_hash(PROFILE_EXTRACTION_SYSTEM_PROMPT),
             "user_prompt_hash": prompt_hash(PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE),
             "response_schema": PROFILE_RESPONSE_SCHEMA,
+            "max_tokens": PROFILE_MAX_TOKENS,
         }
         return hashlib.sha256(
             json.dumps(
@@ -393,7 +396,7 @@ class ProfileBuilder:
                 PROFILE_EXTRACTION_SYSTEM_PROMPT.format(user_name="the user"),
                 user_prompt,
                 temperature=0.2,
-                max_tokens=3000,
+                max_tokens=PROFILE_MAX_TOKENS,
                 response_schema=PROFILE_RESPONSE_SCHEMA,
             )
             logical_results.append(result)
@@ -706,7 +709,7 @@ class DeepEmpathyGenerator:
                 EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
                 user_prompt,
                 temperature=0.2,
-                max_tokens=1800,
+                max_tokens=ALIGNMENT_MAX_TOKENS,
                 response_schema=ALIGNMENT_RESPONSE_SCHEMA,
             )
             logical_results.append(result)

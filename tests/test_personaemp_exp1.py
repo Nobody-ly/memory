@@ -17,6 +17,7 @@ from src.experiments.personaemp.dataset import (
 )
 from src.experiments.personaemp.generation import (
     RESPONSE_MAX_TOKENS,
+    PROFILE_MAX_TOKENS,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     BaseModelGenerator,
     DeepEmpathyGenerator,
@@ -312,6 +313,7 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             profile_call["response_schema"]["schema"]["required"],
             ["core", "regulation", "cognition", "identity", "behavior"],
         )
+        self.assertEqual(profile_call["max_tokens"], PROFILE_MAX_TOKENS)
         self.assertIn(
             "empathy_state",
             alignment_call["response_schema"]["schema"]["required"],
