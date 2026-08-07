@@ -13,12 +13,13 @@
 
 ## 配置生成模型
 
-模型通过环境变量配置。后续生成和 Qwen Judge 统一使用论文指定模型：
+模型通过环境变量配置。回复生成使用论文 Table 1 的主干模型
+`Qwen3-8B`；Qwen Judge 另行使用 `Qwen3-30B-A3B-Instruct`：
 
 ```powershell
 $env:PERSONAEMP_GENERATOR_API_KEY="<local-secret>"
 $env:PERSONAEMP_GENERATOR_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-$env:PERSONAEMP_GENERATOR_MODEL="qwen3-30b-a3b-instruct-2507"
+$env:PERSONAEMP_GENERATOR_MODEL="qwen3-8b"
 $env:PERSONAEMP_GENERATOR_ENABLE_THINKING="false"
 ```
 

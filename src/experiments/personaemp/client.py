@@ -110,7 +110,7 @@ class OpenAICompatibleChatBackend:
         return cls(
             api_key=env("API_KEY", os.getenv("API_KEY", "")),
             base_url=env("BASE_URL", os.getenv("BASE_URL", "")),
-            model=env("MODEL", "qwen3-30b-a3b-instruct-2507"),
+            model=env("MODEL", "qwen3-8b"),
             timeout_seconds=float(env("TIMEOUT_SECONDS", "180")),
             max_attempts=int(env("MAX_ATTEMPTS", "6")),
             enable_thinking=env("ENABLE_THINKING", "false").lower()
@@ -156,7 +156,13 @@ class OpenAICompatibleChatBackend:
                     }
                 else:
                     request["temperature"] = temperature
-                    if self.enable_thinking:
+                    if self.is_dashscope_qwen:
+                        # DashScope Qwen3 requires an explicit value for
+                        # non-streaming requests, including non-thinking mode.
+                        request["extra_body"] = {
+                            "enable_thinking": self.enable_thinking
+                        }
+                    elif self.enable_thinking:
                         request["extra_body"] = {"enable_thinking": True}
                 if response_schema is not None:
                     if self._uses_required_tool_schema():

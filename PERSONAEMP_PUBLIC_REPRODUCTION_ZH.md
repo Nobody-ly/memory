@@ -9,7 +9,7 @@
 3. `rag`：与 query 最相关的 Top-3 memory + query。
 4. `ours`：完整 memory + 五层画像 + 现有共情理解、预测和探索。
 
-四种方法使用相同的 `qwen3-30b-a3b-instruct-2507`、共同回复
+四种方法使用相同的论文主干模型 `qwen3-8b`、共同回复
 system prompt 和解码参数。
 生成器看不到数据集已有的 persona、situation、category 或
 `relevant_mem`。这些字段只用于官方评价或 RAG 的事后 Recall@3 诊断。
@@ -34,7 +34,8 @@ API key 只设置在当前终端环境，不写入 `.env` 或代码：
 ```powershell
 $env:PERSONAEMP_GENERATOR_API_KEY="<key>"
 $env:PERSONAEMP_GENERATOR_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-$env:PERSONAEMP_GENERATOR_MODEL="qwen3-30b-a3b-instruct-2507"
+$env:PERSONAEMP_GENERATOR_MODEL="qwen3-8b"
+$env:PERSONAEMP_GENERATOR_ENABLE_THINKING="false"
 ```
 
 ## 1. 重建公开数据

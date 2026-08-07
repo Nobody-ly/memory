@@ -374,7 +374,7 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
         backend = OpenAICompatibleChatBackend.__new__(
             OpenAICompatibleChatBackend
         )
-        backend.model = "qwen3-30b-a3b-instruct-2507"
+        backend.model = "qwen3-8b"
         backend.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         backend.max_attempts = 1
         backend.enable_thinking = False
@@ -412,6 +412,10 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
         self.assertIn("tools", completions.request)
         self.assertIn("tool_choice", completions.request)
         self.assertNotIn("response_format", completions.request)
+        self.assertEqual(
+            completions.request["extra_body"],
+            {"enable_thinking": False},
+        )
 
     def test_alpsbench_adapter_joins_gold_and_reconstructs_intent(self) -> None:
         input_row = {
