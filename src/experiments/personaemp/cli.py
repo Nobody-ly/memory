@@ -15,6 +15,7 @@ from .generation import (
     ProfileBuilder,
     ProfileCache,
     RAGGenerator,
+    RAG_ENCODER_MODEL,
     RAGRetriever,
     SentenceTransformerEncoder,
 )
@@ -103,7 +104,7 @@ def main() -> int:
     }
     if "rag" in args.methods:
         retriever = RAGRetriever(
-            SentenceTransformerEncoder("intfloat/e5-base-v2"),
+            SentenceTransformerEncoder(RAG_ENCODER_MODEL),
             JsonCache(args.output_dir / "cache" / "rag_embeddings"),
         )
         generators["rag"] = RAGGenerator(backend, retriever)

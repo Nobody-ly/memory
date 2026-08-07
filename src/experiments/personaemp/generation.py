@@ -32,6 +32,8 @@ Respond under all of these requirements:
 8. Output only the final response."""
 
 RESPONSE_MAX_TOKENS = 350
+RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
+RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 BASE_MODEL_USER_PROMPT = """You will be provided with memories extracted from previous dialogue.
 Use them as background evidence and generate the final response.
 
@@ -482,7 +484,11 @@ class MemoryGenerator:
 
 
 class SentenceTransformerEncoder:
-    def __init__(self, model_name: str = "intfloat/e5-base-v2") -> None:
+    def __init__(
+        self,
+        model_name: str = RAG_ENCODER_MODEL,
+        revision: str = RAG_ENCODER_REVISION,
+    ) -> None:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
@@ -490,7 +496,8 @@ class SentenceTransformerEncoder:
                 "sentence-transformers is required for the RAG baseline"
             ) from exc
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.revision = revision
+        self.model = SentenceTransformer(model_name, revision=revision)
 
     def encode_query(self, query: str) -> list[float]:
         vector = self.model.encode(
@@ -530,6 +537,7 @@ class RAGRetriever:
         value = {
             "memory": sample.memory_items,
             "encoder": self.encoder.model_name,
+            "encoder_revision": getattr(self.encoder, "revision", None),
         }
         return hashlib.sha256(
             json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -548,6 +556,7 @@ class RAGRetriever:
             {
                 "format_version": 1,
                 "encoder": self.encoder.model_name,
+                "encoder_revision": getattr(self.encoder, "revision", None),
                 "vectors": vectors,
             },
         )

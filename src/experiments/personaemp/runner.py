@@ -22,6 +22,8 @@ from .generation import (
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
     RAG_RESPONSE_USER_PROMPT,
+    RAG_ENCODER_MODEL,
+    RAG_ENCODER_REVISION,
     BaseModelGenerator,
     DeepEmpathyGenerator,
     MemoryGenerator,
@@ -432,7 +434,8 @@ class PersonaEmpRunner:
                     "benchmark_response_contract_is_adapter_local"
                 ),
                 "rag": {
-                    "encoder": "intfloat/e5-base-v2",
+                    "encoder": RAG_ENCODER_MODEL,
+                    "encoder_revision": RAG_ENCODER_REVISION,
                     "similarity": "cosine_on_normalized_embeddings",
                     "top_k": 3,
                     "dataset_relevant_mem_used_for_retrieval": False,
