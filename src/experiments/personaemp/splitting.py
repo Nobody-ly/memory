@@ -262,16 +262,49 @@ def _subset(dataset: PersonaEmpDataset, user_ids: set[str]) -> list[dict[str, An
     ]
 
 
-def build_split_artifacts(
+def build_random_split_artifacts(
     dataset: PersonaEmpDataset,
     output_dir: Path,
-    labeler: BigFiveLabeler,
 ) -> dict[str, Any]:
     user_ids = [
         str(session.get("session_id") or session.get("original_sid") or "")
         for session in dataset.raw_sessions
     ]
     random_train, random_test = random_user_split(user_ids)
+    files = {
+        "random_train": output_dir / "random_train.json",
+        "random_test": output_dir / "random_test.json",
+    }
+    _atomic_json(files["random_train"], _subset(dataset, set(random_train)))
+    _atomic_json(files["random_test"], _subset(dataset, set(random_test)))
+    manifest = {
+        "protocol": "personaemp_public_random_split_v1",
+        "dataset_sha256": dataset.fingerprint,
+        "random": {
+            "seed": 42,
+            "ratio": "9:1",
+            "train_users": random_train,
+            "test_users": random_test,
+        },
+        "ood": {
+            "status": "not_built",
+            "reason": "Big Five label model credentials were not supplied",
+        },
+        "files": {name: str(path) for name, path in files.items()},
+    }
+    _atomic_json(output_dir / "split_manifest.json", manifest)
+    return manifest
+
+
+def build_split_artifacts(
+    dataset: PersonaEmpDataset,
+    output_dir: Path,
+    labeler: BigFiveLabeler,
+) -> dict[str, Any]:
+    random_manifest = build_random_split_artifacts(dataset, output_dir)
+    random_train = random_manifest["random"]["train_users"]
+    random_test = random_manifest["random"]["test_users"]
+    user_ids = [*random_train, *random_test]
     personas = {
         str(session.get("session_id") or session.get("original_sid") or ""):
         str((session.get("persona") or {}).get("persona_profile")
@@ -334,12 +367,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--env-prefix", default="PERSONAEMP_BIG5")
+    parser.add_argument(
+        "--random-only",
+        action="store_true",
+        help="Build the user-level 9:1 Random split without Big Five/OOD.",
+    )
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
     dataset = PersonaEmpDataset.load(args.dataset)
+    if args.random_only:
+        manifest = build_random_split_artifacts(dataset, args.output_dir)
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return 0
     backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
     labeler = BigFiveLabeler(
         backend,

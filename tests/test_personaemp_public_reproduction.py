@@ -33,6 +33,7 @@ from src.experiments.personaemp.resumable_official_pipeline import (
 from src.experiments.personaemp.splitting import (
     TRAITS,
     build_ood_split,
+    build_random_split_artifacts,
     random_user_split,
 )
 
@@ -639,6 +640,33 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(first[1]), 2)
         self.assertFalse(set(first[0]).intersection(first[1]))
+
+    def test_random_only_artifacts_do_not_require_or_claim_ood(self) -> None:
+        raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        template = raw[0]
+        sessions = []
+        for index in range(10):
+            session = json.loads(json.dumps(template))
+            session["session_id"] = f"user-{index}"
+            for query_index, query in enumerate(session["queries"]):
+                query["query_id"] = f"user-{index}:{query_index}"
+            sessions.append(session)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset_path = root / "dataset.json"
+            dataset_path.write_text(json.dumps(sessions), encoding="utf-8")
+            dataset = PersonaEmpDataset.load(dataset_path)
+            manifest = build_random_split_artifacts(dataset, root / "splits")
+
+            random_test = json.loads(
+                (root / "splits" / "random_test.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(len(manifest["random"]["test_users"]), 1)
+        self.assertEqual(len(random_test), 1)
+        self.assertEqual(manifest["ood"]["status"], "not_built")
 
     def test_paired_bootstrap_uses_user_level_differences(self) -> None:
         baseline = {
