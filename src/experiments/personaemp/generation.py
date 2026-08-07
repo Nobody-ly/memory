@@ -34,6 +34,7 @@ Respond under all of these requirements:
 RESPONSE_MAX_TOKENS = 350
 PROFILE_MAX_TOKENS = 6000
 ALIGNMENT_MAX_TOKENS = 1800
+STRUCTURED_JSON_PARSER_VERSION = "close_unbalanced_containers_v1"
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 PROFILE_RESPONSE_SCHEMA = {
@@ -146,10 +147,46 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     end = value.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("response does not contain a JSON object")
-    parsed = json.loads(value[start : end + 1])
+    candidate = value[start : end + 1]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        repaired = _close_unbalanced_json_containers(candidate)
+        if exc.pos < len(candidate) - 1 or repaired == candidate:
+            raise
+        parsed = json.loads(repaired)
     if not isinstance(parsed, dict):
         raise ValueError("response JSON root must be an object")
     return parsed
+
+
+def _close_unbalanced_json_containers(value: str) -> str:
+    """Complete only unclosed JSON containers at end of an otherwise valid value."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    pairs = {"{": "}", "[": "]"}
+
+    for character in value:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in pairs:
+            stack.append(pairs[character])
+        elif character in ("}", "]"):
+            if not stack or stack.pop() != character:
+                return value
+
+    if in_string or not stack:
+        return value
+    return value + "".join(reversed(stack))
 
 
 def _memory_block(sample: PersonaEmpSample) -> str:
@@ -366,6 +403,7 @@ class ProfileBuilder:
             "user_prompt_hash": prompt_hash(PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE),
             "response_schema": PROFILE_RESPONSE_SCHEMA,
             "max_tokens": PROFILE_MAX_TOKENS,
+            "parser_version": STRUCTURED_JSON_PARSER_VERSION,
         }
         return hashlib.sha256(
             json.dumps(

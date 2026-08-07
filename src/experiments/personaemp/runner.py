@@ -28,6 +28,7 @@ from .generation import (
     RAG_RESPONSE_USER_PROMPT,
     RAG_ENCODER_MODEL,
     RAG_ENCODER_REVISION,
+    STRUCTURED_JSON_PARSER_VERSION,
     BaseModelGenerator,
     DeepEmpathyGenerator,
     MemoryGenerator,
@@ -108,6 +109,9 @@ def _generation_prompt_hashes() -> dict[str, str]:
         ),
         "empathy_alignment_max_tokens": prompt_hash(
             str(ALIGNMENT_MAX_TOKENS)
+        ),
+        "structured_json_parser": prompt_hash(
+            STRUCTURED_JSON_PARSER_VERSION
         ),
     }
 
@@ -446,6 +450,7 @@ class PersonaEmpRunner:
                 "structured_stage_limits": {
                     "profile_max_tokens": PROFILE_MAX_TOKENS,
                     "alignment_max_tokens": ALIGNMENT_MAX_TOKENS,
+                    "parser_version": STRUCTURED_JSON_PARSER_VERSION,
                 },
                 "core_prompt_policy": (
                     "production_core_prompts_unchanged; "

@@ -24,6 +24,7 @@ from src.experiments.personaemp.generation import (
     ProfileBuilder,
     ProfileCache,
     StageUsage,
+    _parse_json_object,
 )
 from src.experiments.personaemp.runner import (
     PersonaEmpRunner,
@@ -210,6 +211,16 @@ class PersonaEmpDatasetTests(unittest.TestCase):
 
 
 class DeepEmpathyGenerationTests(unittest.TestCase):
+    def test_structured_parser_closes_only_unbalanced_eof_containers(self) -> None:
+        parsed = _parse_json_object(
+            '{"core":{},"regulation":{},"cognition":{},'
+            '"identity":{},"behavior":{"patterns":[]}'
+        )
+        self.assertEqual(parsed["behavior"], {"patterns": []})
+
+        with self.assertRaises(json.JSONDecodeError):
+            _parse_json_object('{"core":{} "regulation":{}}')
+
     def test_stage_usage_includes_all_logical_schema_attempts(self) -> None:
         usage = StageUsage.combine(
             [
