@@ -32,6 +32,7 @@ from src.experiments.personaemp.runner import (
 )
 from src.experiments.personaemp.official_eval import (
     _completed_judge_output,
+    _merge_retry_results,
     summarize_official_results,
     validate_criteria_alignment,
     validate_prediction_alignment,
@@ -424,6 +425,32 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
 
 
 class OfficialEvaluationAdapterTests(unittest.TestCase):
+    def test_merge_retry_results_preserves_valid_scores_and_fills_nulls(self) -> None:
+        previous = [
+            {
+                "session_id": "session-1",
+                "query_id": "query-1",
+                "resonation": {"score": 4.0, "full_judge": "accepted"},
+                "expression": {"score": None, "full_judge": ""},
+                "reception": {"score": 3.0, "full_judge": "accepted"},
+            }
+        ]
+        retried = [
+            {
+                "session_id": "session-1",
+                "query_id": "query-1",
+                "resonation": {"score": 2.0, "full_judge": "new draw"},
+                "expression": {"score": 5.0, "full_judge": "retry"},
+                "reception": {"score": None, "full_judge": ""},
+            }
+        ]
+
+        merged = _merge_retry_results(previous, retried)
+
+        self.assertEqual(merged[0]["resonation"], previous[0]["resonation"])
+        self.assertEqual(merged[0]["expression"], retried[0]["expression"])
+        self.assertEqual(merged[0]["reception"], previous[0]["reception"])
+
     def test_completed_judge_output_requires_matching_protocol_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "result.json"

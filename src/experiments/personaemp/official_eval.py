@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -182,6 +181,63 @@ def summarize_official_results(results_path: Path) -> dict[str, Any]:
     }
 
 
+def _valid_score(value: Any) -> bool:
+    return isinstance(value, (int, float)) and 1 <= float(value) <= 5
+
+
+def _merge_retry_results(
+    previous: list[dict[str, Any]],
+    retried: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep accepted scores and fill only cells missing from an earlier run."""
+    previous_by_id = {
+        (str(row.get("session_id") or ""), str(row.get("query_id") or "")): row
+        for row in previous
+    }
+    retried_ids = {
+        (str(row.get("session_id") or ""), str(row.get("query_id") or ""))
+        for row in retried
+    }
+    if len(previous_by_id) != len(previous) or set(previous_by_id) != retried_ids:
+        raise ValueError("cannot merge judge retries with different result identities")
+
+    merged = json.loads(json.dumps(retried, ensure_ascii=False))
+    for row in merged:
+        identity = (
+            str(row.get("session_id") or ""),
+            str(row.get("query_id") or ""),
+        )
+        old_row = previous_by_id[identity]
+        for dimension in DIMENSIONS:
+            old_dimension = old_row.get(dimension) or {}
+            if _valid_score(old_dimension.get("score")):
+                row[dimension] = old_dimension
+    return merged
+
+
+def _compatible_previous_results(
+    output: Path,
+    *,
+    judge_model: str,
+    input_hashes: dict[str, str],
+) -> list[dict[str, Any]] | None:
+    summary_path = output.with_suffix(".summary.json")
+    if not output.is_file() or not summary_path.is_file():
+        return None
+    try:
+        summary = load_json(summary_path)
+        summary_inputs = summary.get("inputs") or {}
+        if summary.get("judge_model") != judge_model:
+            return None
+        for key in ("dataset_sha256", "predictions_sha256", "criteria_sha256"):
+            if summary_inputs.get(key) != input_hashes.get(key):
+                return None
+        records = load_json(output)
+        return records if isinstance(records, list) else None
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _completed_judge_output(
     output: Path,
     *,
@@ -344,6 +400,11 @@ def run_judge(args: argparse.Namespace) -> None:
         input_hashes=input_hashes,
     ):
         return
+    previous_results = _compatible_previous_results(
+        args.output,
+        judge_model=environment["EVAL_MODEL"],
+        input_hashes=input_hashes,
+    )
     command = [
         str(args.python),
         str(repository / "evaluation" / "eval.py"),
@@ -377,7 +438,18 @@ def run_judge(args: argparse.Namespace) -> None:
             f"official evaluator did not create expected output: {generated_path}"
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(generated_path, args.output)
+    generated_results = load_json(generated_path)
+    if not isinstance(generated_results, list):
+        raise ValueError("official judge result root must be a list")
+    if previous_results is not None:
+        generated_results = _merge_retry_results(
+            previous_results,
+            generated_results,
+        )
+    args.output.write_text(
+        json.dumps(generated_results, ensure_ascii=False, indent=4),
+        encoding="utf-8",
+    )
     summary = summarize_official_results(args.output)
     summary["judge_model"] = environment["EVAL_MODEL"]
     summary["judge_name"] = args.judge_name
@@ -393,6 +465,11 @@ def run_judge(args: argparse.Namespace) -> None:
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    if summary["invalid_scores"]:
+        raise RuntimeError(
+            f"judge returned {len(summary['invalid_scores'])} invalid scores; "
+            "resume will retry only the missing cells"
+        )
 
 
 def _judge_spec(value: str) -> tuple[str, str]:
