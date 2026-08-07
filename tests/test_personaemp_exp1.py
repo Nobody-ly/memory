@@ -221,6 +221,16 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         with self.assertRaises(json.JSONDecodeError):
             _parse_json_object('{"core":{} "regulation":{}}')
 
+    def test_structured_parser_uses_only_first_complete_root_object(self) -> None:
+        parsed = _parse_json_object(
+            '{"empathy_state":{},"prediction":{},"exploration":{}}'
+            '{"unexpected":"duplicate"}'
+        )
+        self.assertEqual(
+            parsed,
+            {"empathy_state": {}, "prediction": {}, "exploration": {}},
+        )
+
     def test_stage_usage_includes_all_logical_schema_attempts(self) -> None:
         usage = StageUsage.combine(
             [

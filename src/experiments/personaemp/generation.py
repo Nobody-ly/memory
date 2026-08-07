@@ -34,7 +34,7 @@ Respond under all of these requirements:
 RESPONSE_MAX_TOKENS = 350
 PROFILE_MAX_TOKENS = 6000
 ALIGNMENT_MAX_TOKENS = 1800
-STRUCTURED_JSON_PARSER_VERSION = "close_unbalanced_containers_v1"
+STRUCTURED_JSON_PARSER_VERSION = "first_complete_or_close_unbalanced_v2"
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 PROFILE_RESPONSE_SCHEMA = {
@@ -147,7 +147,10 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     end = value.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("response does not contain a JSON object")
-    candidate = value[start : end + 1]
+    complete_end = _first_complete_json_container_end(value, start)
+    candidate = value[
+        start : (complete_end + 1 if complete_end is not None else end + 1)
+    ]
     try:
         parsed = json.loads(candidate)
     except json.JSONDecodeError as exc:
@@ -158,6 +161,37 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("response JSON root must be an object")
     return parsed
+
+
+def _first_complete_json_container_end(
+    value: str,
+    start: int,
+) -> int | None:
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    pairs = {"{": "}", "[": "]"}
+
+    for index in range(start, len(value)):
+        character = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in pairs:
+            stack.append(pairs[character])
+        elif character in ("}", "]"):
+            if not stack or stack.pop() != character:
+                return None
+            if not stack:
+                return index
+    return None
 
 
 def _close_unbalanced_json_containers(value: str) -> str:
