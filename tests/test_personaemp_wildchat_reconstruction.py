@@ -12,6 +12,7 @@ from src.experiments.personaemp.wildchat_reconstruction import (
     PAPER_MEMORY_MODEL,
     PaperMemoryExtractor,
     compare_memory_sets,
+    extract_memories,
     paper_style_curation,
     select_long_dialogues,
 )
@@ -103,6 +104,14 @@ class FlakyMemoryBackend(FixedMemoryBackend):
         if self.calls == 1:
             raise RuntimeError("temporary provider failure")
         return super().chat(*args, **kwargs)
+
+
+class ContentRejectedBackend(FixedMemoryBackend):
+    def chat(self, *args, **kwargs) -> ChatResult:  # type: ignore[no-untyped-def]
+        raise RuntimeError(
+            "Error code: 400; code=data_inspection_failed; "
+            "Input data may contain inappropriate content"
+        )
 
 
 class WildChatReconstructionTests(unittest.TestCase):
@@ -230,6 +239,41 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertFalse(cached)
         self.assertEqual(backend.calls, 2)
         self.assertEqual(extracted["session_id"], "wc_retry")
+
+    def test_provider_content_rejection_is_terminal_and_auditable(self) -> None:
+        record = {
+            "session_id": "wc_content_rejected",
+            "turns": [
+                {"role": "user", "text": "Sensitive source text."},
+                {"role": "assistant", "text": "Response."},
+                {"role": "user", "text": "More context."},
+                {"role": "assistant", "text": "Response."},
+                {"role": "user", "text": "More context."},
+                {"role": "assistant", "text": "Response."},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            extractor = PaperMemoryExtractor(
+                ContentRejectedBackend(),
+                MemoryExtractionCache(Path(directory) / "cache.jsonl"),
+            )
+            results, stats, failures, exclusions = extract_memories(
+                [record], extractor
+            )
+        self.assertEqual(results, [])
+        self.assertEqual(failures, [])
+        self.assertEqual(stats.content_rejected, 1)
+        self.assertEqual(stats.failed, 0)
+        self.assertEqual(
+            exclusions,
+            [
+                {
+                    "session_id": "wc_content_rejected",
+                    "status": "content_rejected",
+                    "reason_code": "provider_data_inspection_failed",
+                }
+            ],
+        )
 
     def test_curation_retains_implicit_memory_and_is_explicit_about_skipped_dedup(self) -> None:
         direct_only = {"session_id": "a", "memory_items": [{"type": "direct", "label": "Preferences/Food", "value": "tea"}]}

@@ -426,6 +426,7 @@ class MemoryExtractionStats:
     attempted: int
     succeeded: int
     cached: int
+    content_rejected: int
     failed: int
     memories: int
     direct_memories: int
@@ -533,17 +534,43 @@ class PaperMemoryExtractor:
             raise
 
 
+def _terminal_content_rejection_reason(exc: Exception) -> str | None:
+    message = str(exc).lower()
+    if (
+        "data_inspection_failed" in message
+        and "inappropriate content" in message
+    ):
+        return "provider_data_inspection_failed"
+    return None
+
+
 def extract_memories(
     records: Iterable[dict[str, Any]], extractor: PaperMemoryExtractor
-) -> tuple[list[dict[str, Any]], MemoryExtractionStats, list[dict[str, str]]]:
+) -> tuple[
+    list[dict[str, Any]],
+    MemoryExtractionStats,
+    list[dict[str, str]],
+    list[dict[str, str]],
+]:
     results: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
+    exclusions: list[dict[str, str]] = []
     attempted = succeeded = cached = memories = direct = implicit = 0
     for record in records:
         attempted += 1
         try:
             extracted, from_cache = extractor.extract(record)
         except Exception as exc:
+            reason = _terminal_content_rejection_reason(exc)
+            if reason is not None:
+                exclusions.append(
+                    {
+                        "session_id": str(record["session_id"]),
+                        "status": "content_rejected",
+                        "reason_code": reason,
+                    }
+                )
+                continue
             failures.append({"session_id": str(record["session_id"]), "error": str(exc)})
             continue
         results.append(extracted)
@@ -557,11 +584,12 @@ def extract_memories(
         attempted=attempted,
         succeeded=succeeded,
         cached=cached,
+        content_rejected=len(exclusions),
         failed=len(failures),
         memories=memories,
         direct_memories=direct,
         implicit_memories=implicit,
-    ), failures
+    ), failures, exclusions
 
 
 def _top_label(memory: dict[str, Any]) -> str:
@@ -834,9 +862,12 @@ def main() -> int:
     extractor = PaperMemoryExtractor(
         backend, MemoryExtractionCache(output_dir / "cache" / "memory_extraction.jsonl")
     )
-    extracted, extraction_stats, failures = extract_memories(selected, extractor)
+    extracted, extraction_stats, failures, exclusions = extract_memories(
+        selected, extractor
+    )
     _write_jsonl(output_dir / "stages" / "memory_extracted.jsonl", extracted)
     _write_jsonl(output_dir / "stages" / "memory_failures.jsonl", failures)
+    _write_jsonl(output_dir / "stages" / "memory_exclusions.jsonl", exclusions)
     curated, curation_stats = paper_style_curation(
         extracted,
         category_cap=args.category_cap,
@@ -890,6 +921,12 @@ def main() -> int:
             "memory_prompt_sha256": prompt_hash(MEMORY_SYSTEM_PROMPT),
             "memory_schema_sha256": prompt_hash(json.dumps(MEMORY_SCHEMA, sort_keys=True)),
             "category_cap": args.category_cap,
+            "content_rejection_policy": {
+                "status": "provider_compatibility_rule",
+                "terminal_reason_code": "provider_data_inspection_failed",
+                "excluded_from_downstream": True,
+                "counted_as_unresolved_failure": False,
+            },
             "semantic_deduplication": {
                 "encoder": args.dedup_encoder,
                 "threshold": args.dedup_threshold,
@@ -908,6 +945,9 @@ def main() -> int:
             "long_dialogues": str(output_dir / "stages" / "long_dialogues.jsonl"),
             "memory_extracted": str(output_dir / "stages" / "memory_extracted.jsonl"),
             "memory_failures": str(output_dir / "stages" / "memory_failures.jsonl"),
+            "memory_exclusions": str(
+                output_dir / "stages" / "memory_exclusions.jsonl"
+            ),
             "by_label_json": str(output_dir / "by_label_json" / "wildchat_reconstruction.json"),
         },
         "table1_direct_comparison_allowed": False,
