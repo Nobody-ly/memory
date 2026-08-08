@@ -69,8 +69,8 @@ def _run_memory_reconstruction(args: argparse.Namespace, output_dir: Path) -> di
             command.extend(["--download-pattern", pattern])
     if args.source_limit is not None:
         command.extend(["--source-limit", str(args.source_limit)])
-    if args.skip_semantic_dedup:
-        command.append("--skip-semantic-dedup")
+    if args.enable_reconstructed_semantic_dedup:
+        command.append("--enable-reconstructed-semantic-dedup")
     if bool(args.gold_input) != bool(args.gold_reference):
         raise ValueError("--gold-input and --gold-reference must be supplied together")
     if args.gold_input and args.gold_reference:
@@ -128,7 +128,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--category-cap", type=int, default=350)
     parser.add_argument("--dedup-encoder", default="intfloat/e5-base-v2")
     parser.add_argument("--dedup-threshold", type=float, default=0.92)
-    parser.add_argument("--skip-semantic-dedup", action="store_true")
+    parser.add_argument(
+        "--enable-reconstructed-semantic-dedup",
+        action="store_true",
+    )
     parser.add_argument("--gold-input", type=Path)
     parser.add_argument("--gold-reference", type=Path)
     parser.add_argument("--gold-limit", type=int, default=12)

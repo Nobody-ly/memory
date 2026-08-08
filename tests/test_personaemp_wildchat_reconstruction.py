@@ -167,6 +167,17 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(stats["rejected_without_implicit_memory"], 1)
         self.assertEqual(stats["semantic_deduplication"]["status"], "skipped_by_flag")
 
+    def test_curation_does_not_enable_unpublished_semantic_dedup_by_default(self) -> None:
+        implicit = {
+            "session_id": "a",
+            "memory_items": [
+                {"type": "implicit", "label": "Preferences/Food", "value": "coffee"}
+            ],
+        }
+        selected, stats = paper_style_curation([implicit], category_cap=10)
+        self.assertEqual([record["session_id"] for record in selected], ["a"])
+        self.assertEqual(stats["semantic_deduplication"]["status"], "skipped_by_flag")
+
     def test_gold_comparison_rewards_identical_memory(self) -> None:
         item = {"type": "direct", "label": "Preferences/Food", "value": "likes tea"}
         comparison = compare_memory_sets([item], [item])

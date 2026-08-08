@@ -94,8 +94,8 @@ fi
 if [[ -n "${PERSONAEMP_SOURCE_LIMIT:-}" ]]; then
   COMMAND+=(--source-limit "$PERSONAEMP_SOURCE_LIMIT")
 fi
-if [[ "${PERSONAEMP_SKIP_SEMANTIC_DEDUP:-0}" == "1" ]]; then
-  COMMAND+=(--skip-semantic-dedup)
+if [[ "${PERSONAEMP_ENABLE_RECONSTRUCTED_SEMANTIC_DEDUP:-0}" == "1" ]]; then
+  COMMAND+=(--enable-reconstructed-semantic-dedup)
 fi
 if [[ "${PERSONAEMP_MEMORY_ONLY:-0}" == "1" ]]; then
   COMMAND+=(--memory-only)

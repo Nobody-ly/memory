@@ -573,14 +573,16 @@ def paper_style_curation(
     category_cap: int,
     encoder_name: str = DEFAULT_DEDUP_ENCODER,
     similarity_threshold: float = DEFAULT_DEDUP_THRESHOLD,
-    skip_semantic_dedup: bool = False,
+    skip_semantic_dedup: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Apply only paper-described retention rules with explicit reconstructed cap.
+    """Apply paper-described retention rules with explicit reconstructed options.
 
     The paper names category caps and implicit-memory priority but not the cap
     values or tie-breakers. This deterministic implementation retains records
     with at least one implicit memory and assigns a record to its most common
-    top-level label before applying the cap.
+    top-level label before applying the cap. An encoder-based semantic pass is
+    available only as a separately recorded reconstruction sensitivity setting;
+    it is disabled by default because the paper gives no encoder or threshold.
     """
     if category_cap < 1:
         raise ValueError("category_cap must be positive")
@@ -793,7 +795,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--category-cap", type=int, default=350)
     parser.add_argument("--dedup-encoder", default=DEFAULT_DEDUP_ENCODER)
     parser.add_argument("--dedup-threshold", type=float, default=DEFAULT_DEDUP_THRESHOLD)
-    parser.add_argument("--skip-semantic-dedup", action="store_true")
+    parser.add_argument(
+        "--enable-reconstructed-semantic-dedup",
+        action="store_true",
+        help=(
+            "Enable the optional E5 threshold pass. This is not paper-defined "
+            "and is disabled in the default reconstruction."
+        ),
+    )
     parser.add_argument("--gold-input", type=Path)
     parser.add_argument("--gold-reference", type=Path)
     parser.add_argument("--gold-limit", type=int, default=12)
@@ -832,7 +841,7 @@ def main() -> int:
         category_cap=args.category_cap,
         encoder_name=args.dedup_encoder,
         similarity_threshold=args.dedup_threshold,
-        skip_semantic_dedup=args.skip_semantic_dedup,
+        skip_semantic_dedup=not args.enable_reconstructed_semantic_dedup,
     )
     _atomic_json(output_dir / "by_label_json" / "wildchat_reconstruction.json", curated)
     audit_path = None
@@ -883,7 +892,9 @@ def main() -> int:
             "semantic_deduplication": {
                 "encoder": args.dedup_encoder,
                 "threshold": args.dedup_threshold,
-                "skipped": args.skip_semantic_dedup,
+                "enabled_as_reconstruction_sensitivity": (
+                    args.enable_reconstructed_semantic_dedup
+                ),
             },
         },
         "source_stats": asdict(source_stats),
