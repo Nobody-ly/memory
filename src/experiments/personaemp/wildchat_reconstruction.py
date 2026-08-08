@@ -94,12 +94,20 @@ Record what the user claims rather than deciding whether an unusual claim is
 true; calibrate confidence and preserve uncertainty. The fictional-content
 rule still applies when the statement is explicitly framed as story, role-play,
 quotation, character description, or hypothetical material.
+Text pasted for grammar checking, translation, rewriting, summarization, or
+other document editing is task content. Do not infer that its people, finances,
+relationships, events, or claims describe the user. A resume or biography may
+support direct memory only when the user explicitly presents it as their own.
 Use repeated requests only as evidence for one consolidated `implicit` pattern.
 An `implicit` memory MUST be supported by at least two distinct user-authored
 turns. Put every supporting user-turn index in `supporting_turn_indices`.
 One-off topical curiosity or a single task request is not implicit memory.
-Prefer omission over fragmentation. Merge semantically related turns and
-return at most 12 compact memories for the whole conversation.
+After collecting direct candidates, scan repeated user behavior for a small
+number of supported implicit patterns. Before returning, consolidate candidates
+into the smallest non-overlapping set: multiple turns about the same emotional
+state, preference, relationship, experience, plan, or constraint form one
+memory, not one memory per turn or paraphrase. Prefer omission over
+fragmentation and return at most 12 compact memories for the whole conversation.
 
 Also assign every applicable intent from the given allowlist. Select `Other`
 only if none applies:

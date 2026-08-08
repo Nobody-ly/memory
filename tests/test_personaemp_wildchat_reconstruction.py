@@ -128,6 +128,9 @@ class WildChatReconstructionTests(unittest.TestCase):
         )
         self.assertIn("Record what the user claims", MEMORY_USER_TEMPLATE)
         self.assertIn("fictional-content", MEMORY_USER_TEMPLATE)
+        self.assertIn("grammar checking", MEMORY_USER_TEMPLATE)
+        self.assertIn("smallest non-overlapping set", MEMORY_USER_TEMPLATE)
+        self.assertIn("scan repeated user behavior", MEMORY_USER_TEMPLATE)
         self.assertEqual(
             MEMORY_SCHEMA["schema"]["properties"]["memory_items"]["maxItems"],
             12,
