@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from src.experiments.personaemp.client import ChatResult
 from src.experiments.personaemp.wildchat_reconstruction import (
+    MEMORY_SCHEMA,
+    MEMORY_USER_TEMPLATE,
     MemoryExtractionCache,
     PAPER_MEMORY_MODEL,
     PaperMemoryExtractor,
@@ -117,6 +119,14 @@ class ContentRejectedBackend(FixedMemoryBackend):
 
 
 class WildChatReconstructionTests(unittest.TestCase):
+    def test_memory_contract_excludes_transient_speech_acts(self) -> None:
+        self.assertIn("not itself durable", MEMORY_USER_TEMPLATE)
+        self.assertIn("asked/requested/inquired", MEMORY_USER_TEMPLATE)
+        self.assertEqual(
+            MEMORY_SCHEMA["schema"]["properties"]["memory_items"]["maxItems"],
+            12,
+        )
+
     def test_full_reconstruction_builds_split_stage_after_dataset(self) -> None:
         expected = {
             "dataset_sha256": "fingerprint",

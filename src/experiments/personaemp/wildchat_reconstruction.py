@@ -82,9 +82,16 @@ Use `UNMAPPED` only when no listed family fits and provide a concise
 label_suggestion. `type` is `direct` for explicit user statements and
 `implicit` only for a stable inference supported by the cited text. Do not
 extract temporary assistant content, generic facts, or unsafe diagnoses.
+`direct` requires an explicit self-fact, preference, past experience, belief,
+plan, possession, relationship, or durable constraint. A request, question,
+command, correction, or test of assistant capabilities is not itself durable
+memory: never output items such as "the user asked/requested/inquired about X".
+Use repeated requests only as evidence for one consolidated `implicit` pattern.
 An `implicit` memory MUST be supported by at least two distinct user-authored
 turns. Put every supporting user-turn index in `supporting_turn_indices`.
 One-off topical curiosity or a single task request is not implicit memory.
+Prefer omission over fragmentation. Merge semantically related turns and
+return at most 12 compact memories for the whole conversation.
 
 Also assign every applicable intent from the given allowlist. Select `Other`
 only if none applies:
@@ -102,6 +109,7 @@ MEMORY_SCHEMA = {
             },
             "memory_items": {
                 "type": "array",
+                "maxItems": 12,
                 "items": {
                     "type": "object",
                     "properties": {
