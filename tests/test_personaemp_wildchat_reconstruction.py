@@ -71,6 +71,21 @@ class FixedMemoryBackend:
         )
 
 
+class DuplicateIntentBackend(FixedMemoryBackend):
+    def chat(self, *args, **kwargs) -> ChatResult:  # type: ignore[no-untyped-def]
+        result = super().chat(*args, **kwargs)
+        payload = json.loads(result.content)
+        payload["intents"] = ["Personal Advice", "Personal Advice"]
+        return ChatResult(
+            content=json.dumps(payload),
+            model=result.model,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            latency_seconds=result.latency_seconds,
+            attempts=result.attempts,
+        )
+
+
 class WrongModelBackend(FixedMemoryBackend):
     model = "qwen3-8b"
 
@@ -160,6 +175,29 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(extracted["intents_ranked"][0]["intent_category"], "Personal Advice")
         self.assertEqual(extracted["memory_items"][0]["evidence"]["utterance_index"], 0)
         self.assertEqual(extracted["memory_items"][1]["type"], "implicit")
+
+    def test_duplicate_intents_are_removed_after_structured_output(self) -> None:
+        record = {
+            "session_id": "wc_duplicate_intent",
+            "turns": [
+                {"role": "user", "text": "I like spicy noodles."},
+                {"role": "assistant", "text": "Noted."},
+                {"role": "user", "text": "I feel lonely sometimes."},
+                {"role": "assistant", "text": "That sounds hard."},
+                {"role": "user", "text": "I want more supportive friends."},
+                {"role": "assistant", "text": "We can think about that."},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            extractor = PaperMemoryExtractor(
+                DuplicateIntentBackend(),
+                MemoryExtractionCache(Path(directory) / "cache.jsonl"),
+            )
+            extracted, _ = extractor.extract(record)
+        self.assertEqual(
+            extracted["intents_ranked"],
+            [{"intent_category": "Personal Advice", "intent_subtype": ""}],
+        )
 
     def test_memory_model_is_paper_locked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

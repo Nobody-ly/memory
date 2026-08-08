@@ -89,7 +89,6 @@ MEMORY_SCHEMA = {
             "intents": {
                 "type": "array",
                 "items": {"type": "string", "enum": [*INTENT_ALLOWLIST, "Other"]},
-                "uniqueItems": True,
             },
             "memory_items": {
                 "type": "array",
@@ -494,11 +493,13 @@ class PaperMemoryExtractor:
                     is not None
                 ]
             )
-            intents = [
-                value
-                for value in parsed.get("intents") or []
-                if value in {*INTENT_ALLOWLIST, "Other"}
-            ]
+            intents = list(
+                dict.fromkeys(
+                    value
+                    for value in parsed.get("intents") or []
+                    if value in {*INTENT_ALLOWLIST, "Other"}
+                )
+            )
             if not intents:
                 intents = ["Other"]
             result_record = {
