@@ -33,7 +33,8 @@ WILDCHAT_REVISION = "78acdff91e618128920151298128e3f85d6e423d"
 MIN_TURNS = 6
 MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
-LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v3"
+MAX_MEMORY_ITEMS = 8
+LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v4"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
 DOCUMENT_EDITING_PATTERN = re.compile(
@@ -44,7 +45,7 @@ DOCUMENT_EDITING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TRANSIENT_SPEECH_ACT_VALUE_PATTERN = re.compile(
-    r"^(?:the\s+)?user\s+(?:asks?|asked|wants?\s+to\s+know|"
+    r"^(?:the\s+)?user\s+(?:asks?|asked|is\s+asking|wants?\s+to\s+know|"
     r"is\s+curious\s+about|is\s+inquiring\s+about|is\s+looking\s+for|"
     r"seeks?\s+information\s+about)\b",
     re.IGNORECASE,
@@ -126,7 +127,7 @@ number of supported implicit patterns. Before returning, consolidate candidates
 into the smallest non-overlapping set: multiple turns about the same emotional
 state, preference, relationship, experience, plan, or constraint form one
 memory, not one memory per turn or paraphrase. Prefer omission over
-fragmentation and return at most 12 compact memories for the whole conversation.
+fragmentation and return at most 8 compact memories for the whole conversation.
 
 Also assign every applicable intent from the given allowlist. Select `Other`
 only if none applies:
@@ -144,7 +145,7 @@ MEMORY_SCHEMA = {
             },
             "memory_items": {
                 "type": "array",
-                "maxItems": 12,
+                "maxItems": MAX_MEMORY_ITEMS,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -1034,6 +1035,10 @@ def main() -> int:
             "local_normalization_version": LOCAL_NORMALIZATION_VERSION,
             "memory_schema_sha256": prompt_hash(json.dumps(MEMORY_SCHEMA, sort_keys=True)),
             "category_cap": args.category_cap,
+            "max_memory_items_per_conversation": {
+                "value": MAX_MEMORY_ITEMS,
+                "basis": "covers 930 of 932 public AlpsBench Task 1 gold records",
+            },
             "content_rejection_policy": {
                 "status": "provider_compatibility_rule",
                 "terminal_reason_code": "provider_data_inspection_failed",

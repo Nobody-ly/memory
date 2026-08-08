@@ -11,6 +11,7 @@ from src.experiments.personaemp.wildchat_reconstruction import (
     MEMORY_SCHEMA,
     MEMORY_USER_TEMPLATE,
     LOCAL_NORMALIZATION_VERSION,
+    MAX_MEMORY_ITEMS,
     MemoryExtractionCache,
     PAPER_MEMORY_MODEL,
     PaperMemoryExtractor,
@@ -123,7 +124,8 @@ class ContentRejectedBackend(FixedMemoryBackend):
 
 class WildChatReconstructionTests(unittest.TestCase):
     def test_memory_contract_excludes_transient_speech_acts(self) -> None:
-        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v3")
+        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v4")
+        self.assertEqual(MAX_MEMORY_ITEMS, 8)
         self.assertIn("not itself durable", MEMORY_USER_TEMPLATE)
         self.assertIn("asked/requested/inquired", MEMORY_USER_TEMPLATE)
         self.assertIn(
@@ -137,7 +139,7 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertIn("scan repeated user behavior", MEMORY_USER_TEMPLATE)
         self.assertEqual(
             MEMORY_SCHEMA["schema"]["properties"]["memory_items"]["maxItems"],
-            12,
+            8,
         )
 
     def test_document_editing_turns_are_annotated_without_changing_source(self) -> None:
