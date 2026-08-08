@@ -42,6 +42,7 @@ class FixedMemoryBackend:
                             "value": "Prefers spicy noodles",
                             "reasoning": "Explicit preference",
                             "evidence_turn_index": 0,
+                            "supporting_turn_indices": [0],
                             "evidence_text": "I like spicy noodles.",
                             "confidence": 0.95,
                             "time_scope": "long_term",
@@ -55,6 +56,7 @@ class FixedMemoryBackend:
                             "value": "Feels isolated after repeated social rejection",
                             "reasoning": "Repeated personal account",
                             "evidence_turn_index": 2,
+                            "supporting_turn_indices": [2, 4],
                             "evidence_text": "People keep ignoring me and I feel alone.",
                             "confidence": 0.7,
                             "time_scope": "ongoing",
@@ -211,6 +213,12 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(extracted["intents_ranked"][0]["intent_category"], "Personal Advice")
         self.assertEqual(extracted["memory_items"][0]["evidence"]["utterance_index"], 0)
         self.assertEqual(extracted["memory_items"][1]["type"], "implicit")
+        self.assertEqual(
+            extracted["memory_items"][1]["evidence"][
+                "supporting_utterance_indices"
+            ],
+            [2, 4],
+        )
 
     def test_duplicate_intents_are_removed_after_structured_output(self) -> None:
         record = {
@@ -233,6 +241,45 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(
             extracted["intents_ranked"],
             [{"intent_category": "Personal Advice", "intent_subtype": ""}],
+        )
+
+    def test_one_turn_implicit_memory_is_rejected_locally(self) -> None:
+        backend = FixedMemoryBackend()
+
+        def one_turn_implicit(*args, **kwargs) -> ChatResult:  # type: ignore[no-untyped-def]
+            result = FixedMemoryBackend.chat(backend, *args, **kwargs)
+            payload = json.loads(result.content)
+            payload["memory_items"][1]["supporting_turn_indices"] = [2]
+            return ChatResult(
+                content=json.dumps(payload),
+                model=result.model,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                latency_seconds=result.latency_seconds,
+                attempts=result.attempts,
+            )
+
+        backend.chat = one_turn_implicit  # type: ignore[method-assign]
+        record = {
+            "session_id": "wc_single_support",
+            "turns": [
+                {"role": "user", "text": "I like spicy noodles."},
+                {"role": "assistant", "text": "Noted."},
+                {"role": "user", "text": "Tell me about a film."},
+                {"role": "assistant", "text": "Sure."},
+                {"role": "user", "text": "Thanks."},
+                {"role": "assistant", "text": "You are welcome."},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            extractor = PaperMemoryExtractor(
+                backend,
+                MemoryExtractionCache(Path(directory) / "cache.jsonl"),
+            )
+            extracted, _ = extractor.extract(record)
+        self.assertEqual(
+            [item["type"] for item in extracted["memory_items"]],
+            ["direct"],
         )
 
     def test_memory_model_is_paper_locked(self) -> None:

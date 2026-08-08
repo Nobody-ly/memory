@@ -63,7 +63,14 @@ MEMORY_SYSTEM_PROMPT = """You extract durable, personalized memory from real
 human-AI conversations for a long-term personalization benchmark. Use only
 facts supported by user-authored turns. Distinguish direct statements from
 implicit but well-supported inferences. Preserve uncertainty instead of
-inventing detail. Every memory must cite one concrete user-turn index."""
+inventing detail. Every memory must cite concrete user-turn indices.
+
+Treat requested stories, fictional characters, role-play settings, quoted
+material, and hypothetical examples as task content, not facts about the user.
+Never assign a character's identity, relationships, possessions, emotions, or
+events to the user unless the user explicitly identifies themself as that
+character. A single topical request does not establish a stable interest,
+preference, profession, plan, emotional state, or communication style."""
 MEMORY_USER_TEMPLATE = """Conversation (turns are zero-indexed):
 {conversation}
 
@@ -75,6 +82,9 @@ Use `UNMAPPED` only when no listed family fits and provide a concise
 label_suggestion. `type` is `direct` for explicit user statements and
 `implicit` only for a stable inference supported by the cited text. Do not
 extract temporary assistant content, generic facts, or unsafe diagnoses.
+An `implicit` memory MUST be supported by at least two distinct user-authored
+turns. Put every supporting user-turn index in `supporting_turn_indices`.
+One-off topical curiosity or a single task request is not implicit memory.
 
 Also assign every applicable intent from the given allowlist. Select `Other`
 only if none applies:
@@ -101,6 +111,10 @@ MEMORY_SCHEMA = {
                         "value": {"type": "string"},
                         "reasoning": {"type": "string"},
                         "evidence_turn_index": {"type": "integer", "minimum": 0},
+                        "supporting_turn_indices": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 0},
+                        },
                         "evidence_text": {"type": "string"},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "time_scope": {
@@ -117,6 +131,7 @@ MEMORY_SCHEMA = {
                         "value",
                         "reasoning",
                         "evidence_turn_index",
+                        "supporting_turn_indices",
                         "evidence_text",
                         "confidence",
                         "time_scope",
@@ -368,6 +383,22 @@ def _normalise_memory_item(
         if not user_indices:
             return None
         turn_index = user_indices[0]
+    supporting_indices: list[int] = []
+    for raw_index in item.get("supporting_turn_indices") or []:
+        try:
+            support_index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if (
+            0 <= support_index < len(turns)
+            and turns[support_index]["role"] == "user"
+            and support_index not in supporting_indices
+        ):
+            supporting_indices.append(support_index)
+    if turn_index not in supporting_indices:
+        supporting_indices.insert(0, turn_index)
+    if item_type == "implicit" and len(supporting_indices) < 2:
+        return None
     evidence = turns[turn_index]["text"]
     reported_evidence = str(item.get("evidence_text") or "").strip()
     if reported_evidence and reported_evidence not in evidence:
@@ -384,6 +415,7 @@ def _normalise_memory_item(
         "evidence": {
             "session_id": session_id,
             "utterance_index": turn_index,
+            "supporting_utterance_indices": supporting_indices,
             "text": reported_evidence or evidence,
         },
         "confidence": min(max(confidence, 0.0), 1.0),
@@ -941,6 +973,11 @@ def main() -> int:
                 "terminal_reason_code": "provider_data_inspection_failed",
                 "excluded_from_downstream": True,
                 "counted_as_unresolved_failure": False,
+            },
+            "implicit_memory_policy": {
+                "minimum_distinct_user_turns": 2,
+                "fictional_character_facts_are_user_facts": False,
+                "single_topical_request_establishes_stable_trait": False,
             },
             "semantic_deduplication": {
                 "encoder": args.dedup_encoder,
