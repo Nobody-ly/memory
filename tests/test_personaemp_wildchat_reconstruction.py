@@ -124,7 +124,7 @@ class ContentRejectedBackend(FixedMemoryBackend):
 
 class WildChatReconstructionTests(unittest.TestCase):
     def test_memory_contract_excludes_transient_speech_acts(self) -> None:
-        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v4")
+        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v5")
         self.assertEqual(MAX_MEMORY_ITEMS, 8)
         self.assertIn("not itself durable", MEMORY_USER_TEMPLATE)
         self.assertIn("asked/requested/inquired", MEMORY_USER_TEMPLATE)
@@ -185,6 +185,7 @@ class WildChatReconstructionTests(unittest.TestCase):
         for value in (
             "The user is curious about alter-ego naming conventions",
             "The user describes a hypothetical alter ego named Yazmin",
+            "The user prefers the surname Alvarado for the alter ego Yazmin",
         ):
             item = {
                 "type": "direct",
@@ -201,6 +202,22 @@ class WildChatReconstructionTests(unittest.TestCase):
                     ordinal=1,
                 )
             )
+
+        own_item = {
+            "type": "direct",
+            "label": "Personal_Background/Identity",
+            "value": "The user's alter ego is named Yazmin",
+            "evidence_turn_index": 0,
+            "supporting_turn_indices": [0],
+        }
+        self.assertIsNotNone(
+            _normalise_memory_item(
+                own_item,
+                session_id="owned-alter-ego",
+                turns=turns,
+                ordinal=1,
+            )
+        )
 
     def test_full_reconstruction_builds_split_stage_after_dataset(self) -> None:
         expected = {

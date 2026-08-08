@@ -34,7 +34,7 @@ MIN_TURNS = 6
 MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
 MAX_MEMORY_ITEMS = 8
-LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v4"
+LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v5"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
 DOCUMENT_EDITING_PATTERN = re.compile(
@@ -53,6 +53,14 @@ TRANSIENT_SPEECH_ACT_VALUE_PATTERN = re.compile(
 HYPOTHETICAL_TASK_VALUE_PATTERN = re.compile(
     r"\b(?:hypothetical|fictional|role[- ]play\s+character|"
     r"scenario\s+where|a\s+(?:person|boy|girl|man|woman)\s+named)\b",
+    re.IGNORECASE,
+)
+NON_USER_ALTER_EGO_PATTERN = re.compile(
+    r"\balter\s+ego\b",
+    re.IGNORECASE,
+)
+USER_OWN_ALTER_EGO_PATTERN = re.compile(
+    r"\b(?:my|the\s+user(?:'s)?|user's)\s+alter\s+ego\b",
     re.IGNORECASE,
 )
 INTENT_ALLOWLIST = (
@@ -461,6 +469,10 @@ def _normalise_memory_item(
     if item_type == "direct" and (
         TRANSIENT_SPEECH_ACT_VALUE_PATTERN.search(value)
         or HYPOTHETICAL_TASK_VALUE_PATTERN.search(value)
+        or (
+            NON_USER_ALTER_EGO_PATTERN.search(value)
+            and not USER_OWN_ALTER_EGO_PATTERN.search(value)
+        )
     ):
         return None
     evidence = turns[turn_index]["text"]
@@ -1062,6 +1074,9 @@ def main() -> int:
                 ),
                 "direct_hypothetical_task_value_sha256": prompt_hash(
                     HYPOTHETICAL_TASK_VALUE_PATTERN.pattern
+                ),
+                "non_user_alter_ego_value_sha256": prompt_hash(
+                    NON_USER_ALTER_EGO_PATTERN.pattern
                 ),
             },
             "semantic_deduplication": {
