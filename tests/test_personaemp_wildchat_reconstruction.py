@@ -13,6 +13,8 @@ from src.experiments.personaemp.wildchat_reconstruction import (
     MemoryExtractionCache,
     PAPER_MEMORY_MODEL,
     PaperMemoryExtractor,
+    _format_conversation,
+    _normalise_memory_item,
     compare_memory_sets,
     extract_memories,
     paper_style_curation,
@@ -134,6 +136,41 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(
             MEMORY_SCHEMA["schema"]["properties"]["memory_items"]["maxItems"],
             12,
+        )
+
+    def test_document_editing_turns_are_annotated_without_changing_source(self) -> None:
+        turns = [
+            {
+                "role": "user",
+                "text": "My spouse should claim the deduction. check grammar",
+            }
+        ]
+        formatted = _format_conversation(turns)
+        self.assertIn("document-editing request", formatted)
+        self.assertIn(turns[0]["text"], formatted)
+
+    def test_direct_memory_from_only_document_editing_turns_is_rejected(self) -> None:
+        turns = [
+            {
+                "role": "user",
+                "text": "My spouse should claim the deduction. check grammar",
+            },
+            {"role": "assistant", "text": "Here is a correction."},
+        ]
+        item = {
+            "type": "direct",
+            "label": "Social_Relationships/Spouse",
+            "value": "The user is married",
+            "evidence_turn_index": 0,
+            "supporting_turn_indices": [0],
+        }
+        self.assertIsNone(
+            _normalise_memory_item(
+                item,
+                session_id="editing",
+                turns=turns,
+                ordinal=1,
+            )
         )
 
     def test_full_reconstruction_builds_split_stage_after_dataset(self) -> None:

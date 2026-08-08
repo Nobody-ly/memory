@@ -35,6 +35,13 @@ MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
+DOCUMENT_EDITING_PATTERN = re.compile(
+    r"\b(?:check|cehck|correct|fix)\s+(?:the\s+)?grammar\b"
+    r"|\bgrammar\s+(?:check|correction)\b"
+    r"|\b(?:proofread|rewrite|polish)\s+(?:this|the|my)\b"
+    r"|\btranslate\s+(?:this\s+)?(?:into|to|in)\b",
+    re.IGNORECASE,
+)
 INTENT_ALLOWLIST = (
     "Learning Support",
     "Conversational Engagement",
@@ -372,11 +379,21 @@ def download_wildchat_snapshot(
     )
 
 
+def _looks_like_document_editing_task(text: str) -> bool:
+    return bool(DOCUMENT_EDITING_PATTERN.search(text))
+
+
 def _format_conversation(turns: list[dict[str, str]]) -> str:
-    return "\n".join(
-        f"[{index}] {turn['role']}: {turn['text']}"
-        for index, turn in enumerate(turns)
-    )
+    rows = []
+    for index, turn in enumerate(turns):
+        annotation = ""
+        if turn["role"] == "user" and _looks_like_document_editing_task(turn["text"]):
+            annotation = (
+                " [document-editing request: draft facts are not user facts unless "
+                "explicitly identified as the user's own]"
+            )
+        rows.append(f"[{index}] {turn['role']}{annotation}: {turn['text']}")
+    return "\n".join(rows)
 
 
 def _label_is_valid(value: str) -> bool:
@@ -422,6 +439,11 @@ def _normalise_memory_item(
     if turn_index not in supporting_indices:
         supporting_indices.insert(0, turn_index)
     if item_type == "implicit" and len(supporting_indices) < 2:
+        return None
+    if item_type == "direct" and supporting_indices and all(
+        _looks_like_document_editing_task(turns[index]["text"])
+        for index in supporting_indices
+    ):
         return None
     evidence = turns[turn_index]["text"]
     reported_evidence = str(item.get("evidence_text") or "").strip()
@@ -1002,6 +1024,12 @@ def main() -> int:
                 "minimum_distinct_user_turns": 2,
                 "fictional_character_facts_are_user_facts": False,
                 "single_topical_request_establishes_stable_trait": False,
+            },
+            "document_editing_task_policy": {
+                "annotated_in_prompt": True,
+                "direct_memory_from_only_annotated_turns": False,
+                "repeated_behavior_may_support_implicit_memory": True,
+                "pattern_sha256": prompt_hash(DOCUMENT_EDITING_PATTERN.pattern),
             },
             "semantic_deduplication": {
                 "encoder": args.dedup_encoder,
