@@ -122,6 +122,12 @@ class WildChatReconstructionTests(unittest.TestCase):
     def test_memory_contract_excludes_transient_speech_acts(self) -> None:
         self.assertIn("not itself durable", MEMORY_USER_TEMPLATE)
         self.assertIn("asked/requested/inquired", MEMORY_USER_TEMPLATE)
+        self.assertIn(
+            "Do not discard a durable direct statement",
+            MEMORY_USER_TEMPLATE,
+        )
+        self.assertIn("Record what the user claims", MEMORY_USER_TEMPLATE)
+        self.assertIn("fictional-content", MEMORY_USER_TEMPLATE)
         self.assertEqual(
             MEMORY_SCHEMA["schema"]["properties"]["memory_items"]["maxItems"],
             12,

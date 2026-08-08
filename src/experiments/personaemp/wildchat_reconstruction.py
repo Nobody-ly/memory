@@ -86,6 +86,14 @@ extract temporary assistant content, generic facts, or unsafe diagnoses.
 plan, possession, relationship, or durable constraint. A request, question,
 command, correction, or test of assistant capabilities is not itself durable
 memory: never output items such as "the user asked/requested/inquired about X".
+Do not discard a durable direct statement merely because it appears inside a
+conversation dominated by requests or questions. Explicit identity claims,
+beliefs, preferences, past experiences, plans, possessions, relationships, and
+constraints remain direct memory when the user presents them as their own.
+Record what the user claims rather than deciding whether an unusual claim is
+true; calibrate confidence and preserve uncertainty. The fictional-content
+rule still applies when the statement is explicitly framed as story, role-play,
+quotation, character description, or hypothetical material.
 Use repeated requests only as evidence for one consolidated `implicit` pattern.
 An `implicit` memory MUST be supported by at least two distinct user-authored
 turns. Put every supporting user-turn index in `supporting_turn_indices`.
