@@ -11,14 +11,15 @@ from src.experiments.personaemp.client import (
     OpenAICompatibleChatBackend,
     _is_retryable,
 )
+from src.experiments.personaemp.cli import _parser as generation_parser
 from src.experiments.personaemp.dataset import (
     PersonaEmpDataset,
     PersonaEmpDatasetError,
 )
 from src.experiments.personaemp.generation import (
     PERSONAEMP_AGENT_PERSONA_DISABLED,
-    PERSONAEMP_OMEGA,
     RESPONSE_MAX_TOKENS,
+    RESPONSE_TEMPERATURE,
     PROFILE_MAX_TOKENS,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     BaseModelGenerator,
@@ -125,6 +126,11 @@ class FakeBackend:
                         "decision": "balanced",
                         "exploration_focus": "preferred boundary wording",
                     },
+                    "alignment": {
+                        "empathy_adjustment": "increase validation",
+                        "alignment_rationale": "the user is conflicted",
+                        "risk_assessment": "avoid pressure",
+                    },
                     "empathy_state": {
                         "empathy_level": "high",
                         "activated_tone": "warm and validating",
@@ -166,6 +172,12 @@ class RecordingCompletions:
 
 
 class PersonaEmpClientTests(unittest.TestCase):
+    def test_generation_cli_defaults_to_ours_only(self) -> None:
+        args = generation_parser().parse_args(
+            ["--dataset", str(FIXTURE), "--output-dir", "output"]
+        )
+        self.assertEqual(args.methods, ("ours",))
+
     def test_does_not_retry_authentication_errors(self) -> None:
         authentication_error = RuntimeError("invalid authentication")
         authentication_error.status_code = 401
@@ -295,6 +307,10 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             "exploration",
             output.to_record()["qualitative_artifacts"],
         )
+        self.assertEqual(
+            output.qualitative_artifacts["alignment"]["empathy_adjustment"],
+            "increase validation",
+        )
         self.assertEqual(base_output.method, "base_model")
         ours_call = backend.calls[-2]
         base_call = backend.calls[-1]
@@ -306,15 +322,24 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             base_call["system"],
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
         )
-        self.assertIn("2 to 4 concise", str(ours_call["system"]).lower())
-        self.assertIn("one paragraph", str(ours_call["system"]).lower())
+        self.assertEqual(
+            str(ours_call["system"]),
+            "",
+        )
+        self.assertNotIn("2 to 4", str(ours_call["system"]).lower())
+        self.assertNotIn("one paragraph", str(ours_call["system"]).lower())
         self.assertIn(
-            "actionable suggestion or example phrase",
-            str(base_call["system"]),
+            "extracted memories from the previous dialogue",
+            str(base_call["user"]),
+        )
+        self.assertIn(
+            "You are a helpful, warm, and empathetic AI assistant.",
+            str(ours_call["user"]),
         )
         self.assertEqual(ours_call["max_tokens"], RESPONSE_MAX_TOKENS)
         self.assertEqual(base_call["max_tokens"], RESPONSE_MAX_TOKENS)
         self.assertEqual(ours_call["temperature"], base_call["temperature"])
+        self.assertEqual(ours_call["temperature"], RESPONSE_TEMPERATURE)
         self.assertIn(sample.query, str(ours_call["user"]))
         self.assertIn(sample.query, str(base_call["user"]))
         self.assertIn("close friend group", str(ours_call["user"]))
@@ -355,7 +380,8 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             str(alignment_call["system"]),
         )
         self.assertNotIn("AGENT PERSONA:\n{}", str(alignment_call["user"]))
-        self.assertEqual(output.omega, PERSONAEMP_OMEGA)
+        self.assertGreater(output.omega or 0.0, 0.0)
+        self.assertLessEqual(output.omega or 0.0, 1.0)
         self.assertIn('"confidence": 0.9', str(alignment_call["user"]))
         self.assertNotIn("private evidence marker", str(alignment_call["user"]))
         self.assertNotIn("private evidence marker", str(ours_call["user"]))
@@ -432,11 +458,11 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["generation"]["protocol_version"],
-            "personaemp_benchmark_adapter_v4",
+            "personaemp_benchmark_adapter_v5",
         )
-        self.assertTrue(
+        self.assertFalse(
             manifest["generation"]["response_contract"][
-                "brevity_instruction"
+                "style_restrictions_added"
             ]
         )
         self.assertFalse(
@@ -446,11 +472,11 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["generation"]["personaemp_alignment_adapter"][
-                "omega_value"
+                "omega_mode"
             ],
-            PERSONAEMP_OMEGA,
+            "profile_completeness_only",
         )
-        self.assertFalse(
+        self.assertTrue(
             manifest["generation"]["personaemp_alignment_adapter"][
                 "omega_uses_profile_completeness"
             ]

@@ -30,17 +30,30 @@ set +a
 : "${PERSONAEMP_MEMORY_API_KEY:?missing memory API key}"
 : "${PERSONAEMP_MEMORY_BASE_URL:?missing memory base URL}"
 : "${PERSONAEMP_MEMORY_MODEL:?missing memory model}"
-: "${PERSONAEMP_DATA_API_KEY:?missing data-construction API key}"
-: "${PERSONAEMP_DATA_BASE_URL:?missing data-construction base URL}"
-: "${PERSONAEMP_DATA_MODEL:?missing data-construction model}"
+MEMORY_ONLY="${PERSONAEMP_MEMORY_ONLY:-0}"
+
+if [[ "$MEMORY_ONLY" != "1" ]]; then
+  : "${PERSONAEMP_DATA_API_KEY:?missing data-construction API key}"
+  : "${PERSONAEMP_DATA_BASE_URL:?missing data-construction base URL}"
+  : "${PERSONAEMP_DATA_MODEL:?missing data-construction model}"
+  : "${PERSONAEMP_BIG5_API_KEY:?missing Big Five API key}"
+  : "${PERSONAEMP_BIG5_BASE_URL:?missing Big Five base URL}"
+  : "${PERSONAEMP_BIG5_MODEL:?missing Big Five model}"
+fi
 
 if [[ "$PERSONAEMP_MEMORY_MODEL" != "deepseek-v3.2" ]]; then
   echo "Memory model must be deepseek-v3.2, got $PERSONAEMP_MEMORY_MODEL" >&2
   exit 2
 fi
-if [[ "$PERSONAEMP_DATA_MODEL" != "MiniMax-M2.5" ]]; then
-  echo "Data-construction model must be MiniMax-M2.5, got $PERSONAEMP_DATA_MODEL" >&2
-  exit 2
+if [[ "$MEMORY_ONLY" != "1" ]]; then
+  if [[ "$PERSONAEMP_DATA_MODEL" != "MiniMax-M2.5" ]]; then
+    echo "Data-construction model must be MiniMax-M2.5, got $PERSONAEMP_DATA_MODEL" >&2
+    exit 2
+  fi
+  if [[ "$PERSONAEMP_BIG5_MODEL" != "deepseek-v4-flash" ]]; then
+    echo "Big Five model must be deepseek-v4-flash, got $PERSONAEMP_BIG5_MODEL" >&2
+    exit 2
+  fi
 fi
 
 # This pipeline uses remote APIs plus a CPU E5 encoder; it must not occupy a GPU.
@@ -97,7 +110,7 @@ fi
 if [[ "${PERSONAEMP_ENABLE_RECONSTRUCTED_SEMANTIC_DEDUP:-0}" == "1" ]]; then
   COMMAND+=(--enable-reconstructed-semantic-dedup)
 fi
-if [[ "${PERSONAEMP_MEMORY_ONLY:-0}" == "1" ]]; then
+if [[ "$MEMORY_ONLY" == "1" ]]; then
   COMMAND+=(--memory-only)
 fi
 if [[ -n "${PERSONAEMP_GOLD_INPUT:-}" || -n "${PERSONAEMP_GOLD_REFERENCE:-}" ]]; then

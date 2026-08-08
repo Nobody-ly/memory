@@ -4,8 +4,8 @@ set -uo pipefail
 RUN_ROOT="${PERSONAEMP_RUN_ROOT:-$HOME/Ly/personaemp-exp1}"
 REPOSITORY_ROOT="${PERSONAEMP_REPOSITORY_ROOT:-$RUN_ROOT/memory}"
 OFFICIAL_ROOT="${PERSONAEMP_OFFICIAL_ROOT:-$RUN_ROOT/PersonalizedEmpathy-official}"
-GENERATION_ROOT="${PERSONAEMP_GENERATION_ROOT:-$RUN_ROOT/runs/random-qwen3-8b-four-methods-v4}"
-EVALUATION_ROOT="${PERSONAEMP_EVALUATION_ROOT:-$RUN_ROOT/runs/random-qwen3-8b-official-eval-v1}"
+GENERATION_ROOT="${PERSONAEMP_GENERATION_ROOT:-$RUN_ROOT/runs/random-qwen3-8b-ours-v1}"
+EVALUATION_ROOT="${PERSONAEMP_EVALUATION_ROOT:-$RUN_ROOT/runs/random-qwen3-8b-ours-official-eval-v1}"
 SECRETS_FILE="${PERSONAEMP_SECRETS_FILE:-$RUN_ROOT/secrets/personaemp.env}"
 MAX_STAGE_RESTARTS="${PERSONAEMP_MAX_STAGE_RESTARTS:-8}"
 
@@ -30,7 +30,8 @@ export CUDA_VISIBLE_DEVICES=""
 source .venv/bin/activate
 
 mkdir -p "$EVALUATION_ROOT/input/predictions"
-for method in base_model memory rag ours; do
+read -r -a METHODS <<< "${PERSONAEMP_METHODS:-ours}"
+for method in "${METHODS[@]}"; do
   cp "$GENERATION_ROOT/predictions/$method.json" \
     "$EVALUATION_ROOT/input/predictions/$method.json"
 done

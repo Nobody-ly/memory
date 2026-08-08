@@ -18,11 +18,17 @@ import sys
 from typing import Any
 
 from .client import OpenAICompatibleChatBackend
+from .dataset import PersonaEmpDataset
 from .reconstruction import (
     OFFICIAL_COMMIT,
     _official_pipeline_summary,
     run_official_pipeline,
     verify_official_checkout,
+)
+from .splitting import (
+    BigFiveCache,
+    BigFiveLabeler,
+    build_split_artifacts,
 )
 from .wildchat_reconstruction import PAPER_MEMORY_MODEL
 
@@ -113,6 +119,22 @@ def _read_curated_records(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
+def _build_reconstructed_splits(
+    final_dataset: Path,
+    output_dir: Path,
+    backend: OpenAICompatibleChatBackend,
+) -> dict[str, Any]:
+    split_dir = output_dir / "splits"
+    return build_split_artifacts(
+        PersonaEmpDataset.load(final_dataset),
+        split_dir,
+        BigFiveLabeler(
+            backend,
+            BigFiveCache(split_dir / "cache" / "big_five.jsonl"),
+        ),
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -137,6 +159,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gold-limit", type=int, default=12)
     parser.add_argument("--memory-env-prefix", default="PERSONAEMP_MEMORY")
     parser.add_argument("--data-env-prefix", default="PERSONAEMP_DATA")
+    parser.add_argument("--big-five-env-prefix", default="PERSONAEMP_BIG5")
     parser.add_argument(
         "--memory-only",
         action="store_true",
@@ -189,9 +212,37 @@ def main() -> int:
     )
     full_manifest.update(
         {
-            "status": "complete",
-            "official_pipeline": _official_pipeline_summary(output_dir, final_dataset),
+            "status": "dataset_complete_waiting_for_splits",
+            "official_pipeline": _official_pipeline_summary(
+                output_dir, final_dataset
+            ),
             "final_dataset": str(final_dataset),
+        }
+    )
+    _atomic_json(output_dir / "full_reconstruction_manifest.json", full_manifest)
+
+    split_backend = OpenAICompatibleChatBackend.from_env(
+        args.big_five_env_prefix
+    )
+    split_dir = output_dir / "splits"
+    split_manifest = _build_reconstructed_splits(
+        final_dataset,
+        output_dir,
+        split_backend,
+    )
+    full_manifest.update(
+        {
+            "status": "complete",
+            "splits": {
+                "status": "complete_reconstruction",
+                "manifest": str(split_dir / "split_manifest.json"),
+                "dataset_sha256": split_manifest["dataset_sha256"],
+                "random_test_users": len(
+                    split_manifest["random"]["test_users"]
+                ),
+                "ood_test_users": len(split_manifest["ood"]["test_users"]),
+                "official_split_identity_recovered": False,
+            },
         }
     )
     _atomic_json(output_dir / "full_reconstruction_manifest.json", full_manifest)

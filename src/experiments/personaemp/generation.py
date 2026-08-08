@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ...epistemic_decay import PROFILE_LAYERS
+from ...epistemic_decay import PROFILE_LAYERS, compute_omega
 from ...profile_utils import flatten_static_profile
 from ...prompts.templates_en import (
     EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
@@ -19,17 +19,7 @@ from .client import ChatBackend, ChatResult
 from .dataset import PersonaEmpSample
 
 
-PERSONAEMP_RESPONSE_SYSTEM_PROMPT = """You are a warm, empathetic conversation partner completing a single-turn personalized empathy benchmark.
-
-Respond under all of these requirements:
-1. Use the same language as the user's query.
-2. Directly address the user's current need. When the user asks for advice, a decision, wording, or practical help, give at least one actionable suggestion or example phrase before any optional follow-up question.
-3. Write exactly one paragraph containing 2 to 4 concise, natural sentences.
-4. Validate the user's feelings when appropriate, without sounding clinical, formal, or patronizing.
-5. Personalize only from the evidence provided. Do not mention memories, profiles, hidden context, or how the response was generated.
-6. Do not invent user facts and do not describe yourself as an AI.
-7. Ask at most one follow-up question.
-8. Output only the final response."""
+PERSONAEMP_RESPONSE_SYSTEM_PROMPT = ""
 
 # PersonaEmp exposes user memory but no agent-side interaction history. Agent
 # persona and Self Domain are therefore disabled only in this benchmark
@@ -54,12 +44,13 @@ PERSONAEMP BENCHMARK ADAPTER OVERRIDE:
 """
 )
 
-RESPONSE_MAX_TOKENS = 350
+RESPONSE_MAX_TOKENS = 1024
+RESPONSE_TEMPERATURE = 0.0
 PROFILE_MAX_TOKENS = 6000
 ALIGNMENT_MAX_TOKENS = 1800
 STRUCTURED_JSON_PARSER_VERSION = "first_complete_or_close_unbalanced_v2"
 PROFILE_PROMPT_VIEW_VERSION = "value_confidence_without_evidence_v1"
-PERSONAEMP_OMEGA = 0.0
+PERSONAEMP_OMEGA_INTERACTION_COUNT = 0
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 PROFILE_RESPONSE_SCHEMA = {
@@ -100,14 +91,13 @@ ALIGNMENT_RESPONSE_SCHEMA = {
         "additionalProperties": False,
     },
 }
-BASE_MODEL_USER_PROMPT = """You will be provided with memories extracted from previous dialogue.
-Use them as background evidence and generate the final response.
+BASE_MODEL_USER_PROMPT = """You are a helpful, warm, and empathetic AI assistant.
+You will be provided with the extracted memories from the previous dialogue. Your task is to generate a response to the user.
+---
 
-User memory evidence:
-{memory}
+**Memory extracted from previous conversation:** {memory}
 
-User query:
-{query}
+**User Query:** {query}
 """
 MEMORY_SUMMARY_SYSTEM_PROMPT = """You summarize user characteristics from
 long-term memory evidence for personalized conversation. Produce a concise,
@@ -118,28 +108,31 @@ facts. Output only the summary."""
 MEMORY_SUMMARY_USER_PROMPT = """User memory evidence:
 {memory}
 """
-MEMORY_RESPONSE_USER_PROMPT = """Generate the final response using the flat
-user-characteristic summary as background evidence.
+MEMORY_RESPONSE_USER_PROMPT = """You are a helpful, warm, and empathetic AI assistant.
+You will be provided with a flat summary derived from the extracted memories from the previous dialogue. Your task is to generate a response to the user.
+---
 
 Flat user-characteristic summary:
 {summary}
 
-User query:
+User Query:
 {query}
 """
-RAG_RESPONSE_USER_PROMPT = """Generate the final response using only the three
-retrieved memory items as background evidence.
+RAG_RESPONSE_USER_PROMPT = """You are a helpful, warm, and empathetic AI assistant.
+You will be provided with retrieved memories from the previous dialogue. Your task is to generate a response to the user.
+---
 
 Retrieved user memory evidence:
 {memory}
 
-User query:
+User Query:
 {query}
 """
-OURS_USER_PROMPT = """Generate the final response using the following evidence and derived reasoning.
+OURS_USER_PROMPT = """You are a helpful, warm, and empathetic AI assistant.
+You will be provided with the extracted memories from the previous dialogue and Deep Empathy reasoning derived from them. Your task is to generate a response to the user.
+---
 
-User memory evidence:
-{memory}
+**Memory extracted from previous conversation:** {memory}
 
 Derived five-layer user profile:
 {profile}
@@ -147,9 +140,17 @@ Derived five-layer user profile:
 Derived deep-empathy state:
 {alignment}
 
-User query:
-{query}
+**User Query:** {query}
 """
+
+
+def _personaemp_omega(profile: dict[str, Any]) -> float:
+    """Use profile uncertainty without inventing cross-query interaction time."""
+
+    return compute_omega(
+        interaction_count=PERSONAEMP_OMEGA_INTERACTION_COUNT,
+        static_profile=profile,
+    )
 
 
 def prompt_hash(text: str) -> str:
@@ -550,7 +551,7 @@ class BaseModelGenerator:
                 memory=_memory_block(sample),
                 query=sample.query,
             ),
-            temperature=0.6,
+            temperature=RESPONSE_TEMPERATURE,
             max_tokens=RESPONSE_MAX_TOKENS,
         )
         return GenerationOutput(
@@ -627,7 +628,7 @@ class MemoryGenerator:
                 summary=summary,
                 query=sample.query,
             ),
-            temperature=0.6,
+            temperature=RESPONSE_TEMPERATURE,
             max_tokens=RESPONSE_MAX_TOKENS,
         )
         stages = {"response": StageUsage.from_result(result)}
@@ -766,7 +767,7 @@ class RAGGenerator:
                 memory=memory,
                 query=sample.query,
             ),
-            temperature=0.6,
+            temperature=RESPONSE_TEMPERATURE,
             max_tokens=RESPONSE_MAX_TOKENS,
         )
         retrieved_indices = [index for index, _text, _score in retrieved]
@@ -851,7 +852,10 @@ class DeepEmpathyGenerator:
                 if not isinstance(understanding, dict):
                     raise ValueError("alignment.understanding must be an object")
                 understanding["self_domain"] = {"status": "disabled"}
-                alignment["alignment"] = {
+                alignment_strategy = alignment.get("alignment")
+                if not isinstance(alignment_strategy, dict):
+                    raise ValueError("alignment.alignment must be an object")
+                alignment["adapter"] = {
                     "mode": "user_domain_only",
                     "agent_persona_used": False,
                     "instruction": (
@@ -869,9 +873,10 @@ class DeepEmpathyGenerator:
 
     def generate(self, sample: PersonaEmpSample) -> GenerationOutput:
         profile, profile_usage = self.profile_builder.build(sample)
-        # PersonaEmp queries are independent single-turn benchmark items, so
-        # active information-seeking is disabled without removing the module.
-        omega = PERSONAEMP_OMEGA
+        # PersonaEmp queries are independent, so temporal history is not
+        # inherited. Profile completeness still controls whether the current
+        # response should explore or exploit.
+        omega = _personaemp_omega(profile)
         alignment, alignment_usage = self._alignment(sample, profile, omega)
 
         response_prompt = OURS_USER_PROMPT.format(
@@ -883,7 +888,7 @@ class DeepEmpathyGenerator:
         response_result = self.backend.chat(
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
             response_prompt,
-            temperature=0.6,
+            temperature=RESPONSE_TEMPERATURE,
             max_tokens=RESPONSE_MAX_TOKENS,
         )
 
@@ -920,6 +925,8 @@ class DeepEmpathyGenerator:
                 "understanding": alignment.get("understanding", {}),
                 "prediction": alignment.get("prediction", {}),
                 "exploration": alignment.get("exploration", {}),
+                "alignment": alignment.get("alignment", {}),
                 "empathy_state": alignment.get("empathy_state", {}),
+                "benchmark_adapter": alignment.get("adapter", {}),
             },
         )

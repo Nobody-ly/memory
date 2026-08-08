@@ -31,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
         "--methods",
         nargs="+",
         choices=("base_model", "memory", "rag", "ours"),
-        default=("base_model", "memory", "rag", "ours"),
+        default=("ours",),
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(

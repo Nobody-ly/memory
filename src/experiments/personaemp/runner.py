@@ -21,13 +21,15 @@ from .generation import (
     OURS_USER_PROMPT,
     PERSONAEMP_AGENT_PERSONA_DISABLED,
     PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT,
-    PERSONAEMP_OMEGA,
+    PERSONAEMP_OMEGA_INTERACTION_COUNT,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
     PROFILE_PROMPT_VIEW_VERSION,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
     PROFILE_MAX_TOKENS,
     PROFILE_RESPONSE_SCHEMA,
+    RESPONSE_MAX_TOKENS,
+    RESPONSE_TEMPERATURE,
     RAG_RESPONSE_USER_PROMPT,
     RAG_ENCODER_MODEL,
     RAG_ENCODER_REVISION,
@@ -413,7 +415,7 @@ class PersonaEmpRunner:
                 "paper": "arXiv:2606.00728v1",
             },
             "generation": {
-                "protocol_version": "personaemp_benchmark_adapter_v4",
+                "protocol_version": "personaemp_benchmark_adapter_v5",
                 "model": self.config.generator_model,
                 "base_url": self.config.generator_base_url,
                 "enable_thinking": self.config.generator_enable_thinking,
@@ -454,13 +456,10 @@ class PersonaEmpRunner:
                 },
                 "response_contract": {
                     "shared_by_all_methods": True,
-                    "same_language_as_query": True,
-                    "paragraphs": 1,
-                    "sentences": "exactly_2_to_4",
-                    "brevity_instruction": True,
-                    "direct_help_before_optional_question": True,
-                    "maximum_follow_up_questions": 1,
-                    "max_tokens": 350,
+                    "source": "official_train_prepare_dataset_prompt",
+                    "style_restrictions_added": False,
+                    "max_tokens": RESPONSE_MAX_TOKENS,
+                    "temperature": RESPONSE_TEMPERATURE,
                 },
                 "personaemp_alignment_adapter": {
                     "agent_persona_mode": "disabled",
@@ -468,9 +467,9 @@ class PersonaEmpRunner:
                     "self_domain_mode": "disabled_user_domain_only",
                     "current_state_inherited_across_queries": False,
                     "temporal_omega_decay_enabled": False,
-                    "omega_uses_profile_completeness": False,
-                    "omega_mode": "fixed_single_turn_exploit",
-                    "omega_value": PERSONAEMP_OMEGA,
+                    "omega_uses_profile_completeness": True,
+                    "omega_mode": "profile_completeness_only",
+                    "interaction_count": PERSONAEMP_OMEGA_INTERACTION_COUNT,
                     "exploration_output_forced": False,
                     "profile_generation_preserves_evidence": True,
                     "profile_prompt_view": PROFILE_PROMPT_VIEW_VERSION,
@@ -482,7 +481,7 @@ class PersonaEmpRunner:
                 },
                 "core_prompt_policy": (
                     "production_core_prompts_unchanged; "
-                    "benchmark_response_contract_is_adapter_local"
+                    "official_personaemp_response_contract"
                 ),
                 "rag": {
                     "encoder": RAG_ENCODER_MODEL,

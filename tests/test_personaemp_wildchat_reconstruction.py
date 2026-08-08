@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.experiments.personaemp.client import ChatResult
 from src.experiments.personaemp.wildchat_reconstruction import (
@@ -14,6 +15,14 @@ from src.experiments.personaemp.wildchat_reconstruction import (
     paper_style_curation,
     select_long_dialogues,
 )
+from src.experiments.personaemp.wildchat_full_reconstruction import (
+    _build_reconstructed_splits,
+)
+from src.experiments.personaemp.splitting import PAPER_BIG_FIVE_MODEL
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PERSONAEMP_FIXTURE = ROOT / "tests" / "fixtures" / "personaemp_paper_case.json"
 
 
 class FixedMemoryBackend:
@@ -66,6 +75,10 @@ class WrongModelBackend(FixedMemoryBackend):
     model = "qwen3-8b"
 
 
+class BigFiveBackend:
+    model = PAPER_BIG_FIVE_MODEL
+
+
 class FlakyMemoryBackend(FixedMemoryBackend):
     def __init__(self) -> None:
         self.calls = 0
@@ -78,6 +91,29 @@ class FlakyMemoryBackend(FixedMemoryBackend):
 
 
 class WildChatReconstructionTests(unittest.TestCase):
+    def test_full_reconstruction_builds_split_stage_after_dataset(self) -> None:
+        expected = {
+            "dataset_sha256": "fingerprint",
+            "random": {"test_users": ["u1"]},
+            "ood": {"test_users": ["u2"]},
+        }
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "src.experiments.personaemp.wildchat_full_reconstruction."
+            "build_split_artifacts",
+            return_value=expected,
+        ) as build:
+            result = _build_reconstructed_splits(
+                PERSONAEMP_FIXTURE,
+                Path(directory),
+                BigFiveBackend(),  # type: ignore[arg-type]
+            )
+        self.assertEqual(result, expected)
+        self.assertEqual(build.call_count, 1)
+        self.assertEqual(
+            build.call_args.args[2].backend.model,
+            PAPER_BIG_FIVE_MODEL,
+        )
+
     def test_turn_filter_uses_paper_range(self) -> None:
         accepted = {
             "conversation": [
