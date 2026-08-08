@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ...epistemic_decay import PROFILE_LAYERS, compute_omega
+from ...epistemic_decay import PROFILE_LAYERS
 from ...profile_utils import flatten_static_profile
 from ...prompts.templates_en import (
     EMPATHY_ALIGNMENT_REASONING_SYSTEM_PROMPT,
@@ -24,11 +24,12 @@ PERSONAEMP_RESPONSE_SYSTEM_PROMPT = """You are a warm, empathetic conversation p
 Respond under all of these requirements:
 1. Use the same language as the user's query.
 2. Directly address the user's current need. When the user asks for advice, a decision, wording, or practical help, give at least one actionable suggestion or example phrase before any optional follow-up question.
-3. Validate the user's feelings when appropriate, without sounding clinical, formal, or patronizing.
-4. Personalize only from the evidence provided. Do not mention memories, profiles, hidden context, or how the response was generated.
-5. Do not invent user facts and do not describe yourself as an AI.
-6. Ask at most one follow-up question.
-7. Output only the final response."""
+3. Write exactly one paragraph containing 2 to 4 concise, natural sentences.
+4. Validate the user's feelings when appropriate, without sounding clinical, formal, or patronizing.
+5. Personalize only from the evidence provided. Do not mention memories, profiles, hidden context, or how the response was generated.
+6. Do not invent user facts and do not describe yourself as an AI.
+7. Ask at most one follow-up question.
+8. Output only the final response."""
 
 # PersonaEmp exposes user memory but no agent-side interaction history. Agent
 # persona and Self Domain are therefore disabled only in this benchmark
@@ -57,6 +58,8 @@ RESPONSE_MAX_TOKENS = 350
 PROFILE_MAX_TOKENS = 6000
 ALIGNMENT_MAX_TOKENS = 1800
 STRUCTURED_JSON_PARSER_VERSION = "first_complete_or_close_unbalanced_v2"
+PROFILE_PROMPT_VIEW_VERSION = "value_confidence_without_evidence_v1"
+PERSONAEMP_OMEGA = 0.0
 RAG_ENCODER_MODEL = "intfloat/e5-base-v2"
 RAG_ENCODER_REVISION = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
 PROFILE_RESPONSE_SCHEMA = {
@@ -260,18 +263,43 @@ def _profile_corpus(sample: PersonaEmpSample) -> str:
     )
 
 
+def _profile_prompt_view(profile: dict[str, Any]) -> dict[str, Any]:
+    """Build the PersonaEmp LLM view without exposing evidence text."""
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            if "value" in value:
+                leaf = {"value": sanitize(value.get("value"))}
+                if "confidence" in value:
+                    leaf["confidence"] = value.get("confidence")
+                return leaf
+            return {
+                key: sanitize(item)
+                for key, item in value.items()
+                if key != "evidence"
+            }
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return value
+
+    sanitized = sanitize(profile)
+    if not isinstance(sanitized, dict):
+        raise ValueError("profile prompt view must be an object")
+    return sanitized
+
+
 def _profile_text(profile: dict[str, Any]) -> str:
-    flattened = flatten_static_profile(profile)
+    prompt_view = _profile_prompt_view(profile)
     lines: list[str] = []
     for layer in PROFILE_LAYERS:
-        fields = flattened.get(layer, {})
+        fields = prompt_view.get(layer, {})
         if not isinstance(fields, dict):
             continue
         for key, value in fields.items():
             if value not in (None, "", [], {}):
                 lines.append(f"[{layer}] {key}: {value}")
     return "\n".join(lines) or json.dumps(
-        flattened,
+        prompt_view,
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -788,7 +816,7 @@ class DeepEmpathyGenerator:
             recent_context=_memory_block(sample),
             user_message=sample.query,
             user_profile=json.dumps(
-                flatten_static_profile(profile),
+                _profile_prompt_view(profile),
                 ensure_ascii=False,
             ),
             agent_persona=json.dumps(
@@ -841,10 +869,9 @@ class DeepEmpathyGenerator:
 
     def generate(self, sample: PersonaEmpSample) -> GenerationOutput:
         profile, profile_usage = self.profile_builder.build(sample)
-        # PersonaEmp supplies memory evidence but no reliable interaction-turn
-        # count. Keep adaptive exploration based on profile completeness while
-        # disabling an unsupported temporal-decay input for this benchmark.
-        omega = compute_omega(interaction_count=0, static_profile=profile)
+        # PersonaEmp queries are independent single-turn benchmark items, so
+        # active information-seeking is disabled without removing the module.
+        omega = PERSONAEMP_OMEGA
         alignment, alignment_usage = self._alignment(sample, profile, omega)
 
         response_prompt = OURS_USER_PROMPT.format(

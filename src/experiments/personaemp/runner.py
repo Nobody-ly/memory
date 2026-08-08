@@ -21,7 +21,9 @@ from .generation import (
     OURS_USER_PROMPT,
     PERSONAEMP_AGENT_PERSONA_DISABLED,
     PERSONAEMP_ALIGNMENT_SYSTEM_PROMPT,
+    PERSONAEMP_OMEGA,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
+    PROFILE_PROMPT_VIEW_VERSION,
     PROFILE_EXTRACTION_SYSTEM_PROMPT,
     PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
     PROFILE_MAX_TOKENS,
@@ -120,6 +122,9 @@ def _generation_prompt_hashes() -> dict[str, str]:
         ),
         "structured_json_parser": prompt_hash(
             STRUCTURED_JSON_PARSER_VERSION
+        ),
+        "profile_prompt_view": prompt_hash(
+            PROFILE_PROMPT_VIEW_VERSION
         ),
     }
 
@@ -450,9 +455,9 @@ class PersonaEmpRunner:
                 "response_contract": {
                     "shared_by_all_methods": True,
                     "same_language_as_query": True,
-                    "paragraphs": "unrestricted",
-                    "sentences": "unrestricted",
-                    "brevity_instruction": False,
+                    "paragraphs": 1,
+                    "sentences": "exactly_2_to_4",
+                    "brevity_instruction": True,
                     "direct_help_before_optional_question": True,
                     "maximum_follow_up_questions": 1,
                     "max_tokens": 350,
@@ -463,7 +468,12 @@ class PersonaEmpRunner:
                     "self_domain_mode": "disabled_user_domain_only",
                     "current_state_inherited_across_queries": False,
                     "temporal_omega_decay_enabled": False,
-                    "omega_uses_profile_completeness": True,
+                    "omega_uses_profile_completeness": False,
+                    "omega_mode": "fixed_single_turn_exploit",
+                    "omega_value": PERSONAEMP_OMEGA,
+                    "exploration_output_forced": False,
+                    "profile_generation_preserves_evidence": True,
+                    "profile_prompt_view": PROFILE_PROMPT_VIEW_VERSION,
                 },
                 "structured_stage_limits": {
                     "profile_max_tokens": PROFILE_MAX_TOKENS,

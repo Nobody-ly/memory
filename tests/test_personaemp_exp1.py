@@ -17,6 +17,7 @@ from src.experiments.personaemp.dataset import (
 )
 from src.experiments.personaemp.generation import (
     PERSONAEMP_AGENT_PERSONA_DISABLED,
+    PERSONAEMP_OMEGA,
     RESPONSE_MAX_TOKENS,
     PROFILE_MAX_TOKENS,
     PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
@@ -75,30 +76,35 @@ class FakeBackend:
                         "social_values": {
                             "value": "deep friendships and autonomy",
                             "confidence": 0.9,
+                            "evidence": "private evidence marker core",
                         }
                     },
                     "regulation": {
                         "coping": {
                             "value": "quiet intellectual hobbies",
                             "confidence": 0.8,
+                            "evidence": "private evidence marker regulation",
                         }
                     },
                     "cognition": {
                         "communication": {
                             "value": "gentle and non-pressuring",
                             "confidence": 0.8,
+                            "evidence": "private evidence marker cognition",
                         }
                     },
                     "identity": {
                         "self_view": {
                             "value": "introverted",
                             "confidence": 0.9,
+                            "evidence": "private evidence marker identity",
                         }
                     },
                     "behavior": {
                         "social_pattern": {
                             "value": "prefers a close friend group",
                             "confidence": 0.9,
+                            "evidence": "private evidence marker behavior",
                         }
                     },
                 }
@@ -300,9 +306,8 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             base_call["system"],
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT,
         )
-        self.assertNotIn("concise", str(ours_call["system"]).lower())
-        self.assertNotIn("sentence", str(ours_call["system"]).lower())
-        self.assertNotIn("paragraph", str(ours_call["system"]).lower())
+        self.assertIn("2 to 4 concise", str(ours_call["system"]).lower())
+        self.assertIn("one paragraph", str(ours_call["system"]).lower())
         self.assertIn(
             "actionable suggestion or example phrase",
             str(base_call["system"]),
@@ -350,7 +355,10 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             str(alignment_call["system"]),
         )
         self.assertNotIn("AGENT PERSONA:\n{}", str(alignment_call["user"]))
-        self.assertEqual(output.omega, 0.875)
+        self.assertEqual(output.omega, PERSONAEMP_OMEGA)
+        self.assertIn('"confidence": 0.9', str(alignment_call["user"]))
+        self.assertNotIn("private evidence marker", str(alignment_call["user"]))
+        self.assertNotIn("private evidence marker", str(ours_call["user"]))
         self.assertEqual(
             output.qualitative_artifacts["understanding"]["self_domain"],
             {"status": "disabled"},
@@ -426,7 +434,7 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
             manifest["generation"]["protocol_version"],
             "personaemp_benchmark_adapter_v4",
         )
-        self.assertFalse(
+        self.assertTrue(
             manifest["generation"]["response_contract"][
                 "brevity_instruction"
             ]
@@ -434,6 +442,17 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
         self.assertFalse(
             manifest["generation"]["personaemp_alignment_adapter"][
                 "temporal_omega_decay_enabled"
+            ]
+        )
+        self.assertEqual(
+            manifest["generation"]["personaemp_alignment_adapter"][
+                "omega_value"
+            ],
+            PERSONAEMP_OMEGA,
+        )
+        self.assertFalse(
+            manifest["generation"]["personaemp_alignment_adapter"][
+                "omega_uses_profile_completeness"
             ]
         )
         self.assertEqual(cached_profile["format_version"], 2)
