@@ -24,6 +24,8 @@ dependencies = [
     "scipy>=1.13,<1.14",
     "pandas>=2.2.3,<3",
     "sentence-transformers>=3.0.0",
+    "huggingface-hub>=0.30,<1",
+    "pyarrow>=18,<20",
 ]
 
 [dependency-groups]

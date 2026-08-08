@@ -22,6 +22,7 @@ TRAITS = (
     "neuroticism",
 )
 LEVELS = ("low", "medium", "high")
+PAPER_BIG_FIVE_MODEL = "deepseek-v4-flash"
 BIG_FIVE_SYSTEM_PROMPT = """You annotate a grounded user persona with the Big
 Five personality model. Assign low, medium, or high for each trait. Use only
 the supplied persona evidence and avoid adding facts. Return the requested
@@ -117,6 +118,11 @@ class BigFiveCache:
 
 class BigFiveLabeler:
     def __init__(self, backend: ChatBackend, cache: BigFiveCache) -> None:
+        if backend.model != PAPER_BIG_FIVE_MODEL:
+            raise ValueError(
+                "PersonaEmp Appendix A.1 requires "
+                f"{PAPER_BIG_FIVE_MODEL}; got {backend.model}"
+            )
         self.backend = backend
         self.cache = cache
 
@@ -340,6 +346,8 @@ def build_split_artifacts(
             "traits": list(TRAITS),
             "levels": list(LEVELS),
             "label_model": labeler.backend.model,
+            "label_model_requirement": PAPER_BIG_FIVE_MODEL,
+            "big_five_prompt_status": "reconstructed_from_paper_description",
             "prompt_sha256": prompt_hash(BIG_FIVE_SYSTEM_PROMPT),
             "k_search": [2, 8],
             "selected_k": ood.selected_k,

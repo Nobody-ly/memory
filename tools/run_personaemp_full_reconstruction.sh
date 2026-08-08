@@ -4,15 +4,15 @@ set -Eeuo pipefail
 RUN_ROOT="${PERSONAEMP_RUN_ROOT:-$HOME/linyi/personaemp-exp1}"
 REPOSITORY_ROOT="${PERSONAEMP_REPOSITORY_ROOT:-$RUN_ROOT/memory}"
 OFFICIAL_ROOT="${PERSONAEMP_OFFICIAL_ROOT:-$RUN_ROOT/PersonalizedEmpathy-official}"
-OUTPUT_ROOT="${PERSONAEMP_OUTPUT_ROOT:-$RUN_ROOT/runs/full-reconstruction-v1}"
+OUTPUT_ROOT="${PERSONAEMP_OUTPUT_ROOT:-$RUN_ROOT/runs/full-wildchat-reconstruction-v1}"
 SECRETS_FILE="${PERSONAEMP_SECRETS_FILE:-$RUN_ROOT/secrets/personaemp.env}"
 MAX_STAGE_RESTARTS="${PERSONAEMP_MAX_STAGE_RESTARTS:-12}"
 
 mkdir -p "$RUN_ROOT/logs" "$RUN_ROOT/cache/huggingface" "$OUTPUT_ROOT"
-LOG_FILE="$RUN_ROOT/logs/full-reconstruction.log"
+LOG_FILE="$RUN_ROOT/logs/full-wildchat-reconstruction.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "[$(date --iso-8601=seconds)] PersonaEmp reconstruction starting"
+echo "[$(date --iso-8601=seconds)] PersonaEmp WildChat reconstruction starting"
 echo "run_root=$RUN_ROOT"
 echo "repository_root=$REPOSITORY_ROOT"
 echo "output_root=$OUTPUT_ROOT"
@@ -27,11 +27,23 @@ set -a
 source "$SECRETS_FILE"
 set +a
 
-: "${PERSONAEMP_GENERATOR_API_KEY:?missing generator API key}"
-: "${PERSONAEMP_GENERATOR_BASE_URL:?missing generator base URL}"
-: "${PERSONAEMP_GENERATOR_MODEL:?missing generator model}"
+: "${PERSONAEMP_MEMORY_API_KEY:?missing memory API key}"
+: "${PERSONAEMP_MEMORY_BASE_URL:?missing memory base URL}"
+: "${PERSONAEMP_MEMORY_MODEL:?missing memory model}"
+: "${PERSONAEMP_DATA_API_KEY:?missing data-construction API key}"
+: "${PERSONAEMP_DATA_BASE_URL:?missing data-construction base URL}"
+: "${PERSONAEMP_DATA_MODEL:?missing data-construction model}"
 
-# The reconstruction uses remote model APIs and does not need a GPU.
+if [[ "$PERSONAEMP_MEMORY_MODEL" != "deepseek-v3.2" ]]; then
+  echo "Memory model must be deepseek-v3.2, got $PERSONAEMP_MEMORY_MODEL" >&2
+  exit 2
+fi
+if [[ "$PERSONAEMP_DATA_MODEL" != "MiniMax-M2.5" ]]; then
+  echo "Data-construction model must be MiniMax-M2.5, got $PERSONAEMP_DATA_MODEL" >&2
+  exit 2
+fi
+
+# This pipeline uses remote APIs plus a CPU E5 encoder; it must not occupy a GPU.
 export CUDA_VISIBLE_DEVICES=""
 export HF_HOME="$RUN_ROOT/cache/huggingface"
 export TOKENIZERS_PARALLELISM=false
@@ -63,12 +75,41 @@ if [[ "$OFFICIAL_COMMIT" != "b555447f267b8057039aab39a4be44725718ea7f" ]]; then
   exit 2
 fi
 
+COMMAND=(
+  uv run python -m src.experiments.personaemp.wildchat_full_reconstruction
+  --output-dir "$OUTPUT_ROOT"
+  --official-repo "$OFFICIAL_ROOT"
+)
+
+if [[ -n "${PERSONAEMP_WILDCHAT_SNAPSHOT_DIR:-}" ]]; then
+  COMMAND+=(--snapshot-dir "$PERSONAEMP_WILDCHAT_SNAPSHOT_DIR")
+else
+  IFS=',' read -r -a PATTERNS <<< "${PERSONAEMP_WILDCHAT_DOWNLOAD_PATTERNS:-}"
+  for pattern in "${PATTERNS[@]}"; do
+    if [[ -n "$pattern" ]]; then
+      COMMAND+=(--download-pattern "$pattern")
+    fi
+  done
+fi
+if [[ -n "${PERSONAEMP_SOURCE_LIMIT:-}" ]]; then
+  COMMAND+=(--source-limit "$PERSONAEMP_SOURCE_LIMIT")
+fi
+if [[ "${PERSONAEMP_SKIP_SEMANTIC_DEDUP:-0}" == "1" ]]; then
+  COMMAND+=(--skip-semantic-dedup)
+fi
+if [[ "${PERSONAEMP_MEMORY_ONLY:-0}" == "1" ]]; then
+  COMMAND+=(--memory-only)
+fi
+if [[ -n "${PERSONAEMP_GOLD_INPUT:-}" || -n "${PERSONAEMP_GOLD_REFERENCE:-}" ]]; then
+  : "${PERSONAEMP_GOLD_INPUT:?missing gold input}"
+  : "${PERSONAEMP_GOLD_REFERENCE:?missing gold reference}"
+  COMMAND+=(--gold-input "$PERSONAEMP_GOLD_INPUT" --gold-reference "$PERSONAEMP_GOLD_REFERENCE")
+fi
+
 attempt=1
 while (( attempt <= MAX_STAGE_RESTARTS )); do
   echo "[$(date --iso-8601=seconds)] reconstruction attempt $attempt"
-  if uv run python -m src.experiments.personaemp.reconstruction \
-    --output-dir "$OUTPUT_ROOT" \
-    --official-repo "$OFFICIAL_ROOT"; then
+  if "${COMMAND[@]}"; then
     touch "$OUTPUT_ROOT/RECONSTRUCTION_COMPLETE"
     echo "[$(date --iso-8601=seconds)] reconstruction completed"
     exit 0

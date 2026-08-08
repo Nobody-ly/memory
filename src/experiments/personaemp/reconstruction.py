@@ -590,6 +590,8 @@ def run_official_pipeline(
     *,
     env_prefix: str,
     python: Path,
+    input_filename: str = "public_reconstruction.json",
+    final_filename: str = "English.public-reconstruction.v1.json",
 ) -> Path:
     repository = repository.resolve()
     output_dir = output_dir.resolve()
@@ -624,7 +626,11 @@ def run_official_pipeline(
     final_dir = trainset_dir / "final_data"
     by_label_dir.mkdir(parents=True, exist_ok=True)
     trainset_dir.mkdir(parents=True, exist_ok=True)
-    input_path = by_label_dir / "public_reconstruction.json"
+    if Path(input_filename).name != input_filename or not input_filename.endswith(".json"):
+        raise ValueError("input_filename must be a plain JSON filename")
+    if Path(final_filename).name != final_filename or not final_filename.endswith(".json"):
+        raise ValueError("final_filename must be a plain JSON filename")
+    input_path = by_label_dir / input_filename
     input_path.write_text(
         json.dumps(records, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -673,7 +679,7 @@ def run_official_pipeline(
     if not english.is_file():
         raise RuntimeError("official pipeline did not produce English.json")
     output_dir.mkdir(parents=True, exist_ok=True)
-    destination = output_dir / "English.public-reconstruction.v1.json"
+    destination = output_dir / final_filename
     shutil.copy2(english, destination)
     return destination
 
