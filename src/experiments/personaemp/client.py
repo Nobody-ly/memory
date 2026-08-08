@@ -82,10 +82,9 @@ class OpenAICompatibleChatBackend:
         self.max_attempts = max_attempts
         self.enable_thinking = enable_thinking
         self.is_kimi_k2 = model.startswith(("kimi-k2.5", "kimi-k2.6"))
-        self.is_dashscope_qwen = (
-            "dashscope.aliyuncs.com" in base_url.lower()
-            and model.lower().startswith("qwen")
-        )
+        # Qwen's OpenAI-compatible contract requires an explicit thinking
+        # switch for non-streaming requests, including through API proxies.
+        self.is_dashscope_qwen = model.lower().startswith("qwen")
         try:
             from openai import OpenAI
         except ImportError as exc:

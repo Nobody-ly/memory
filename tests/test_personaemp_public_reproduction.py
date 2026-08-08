@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from src.experiments.personaemp.client import (
     ChatResult,
@@ -367,7 +368,7 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
         self.assertIn("tool_choice", completions.request)
         self.assertNotIn("response_format", completions.request)
 
-    def test_dashscope_qwen_structured_output_uses_required_tool_schema(
+    def test_qwen_structured_output_uses_required_tool_schema(
         self,
     ) -> None:
         completions = FakeCompletions()
@@ -416,6 +417,15 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
             completions.request["extra_body"],
             {"enable_thinking": False},
         )
+
+    def test_qwen_proxy_is_detected_by_model_identity(self) -> None:
+        with patch("openai.OpenAI"):
+            backend = OpenAICompatibleChatBackend(
+                api_key="test-key",
+                base_url="https://proxy.example/v1",
+                model="qwen3-8b",
+            )
+        self.assertTrue(backend.is_dashscope_qwen)
 
     def test_alpsbench_adapter_joins_gold_and_reconstructs_intent(self) -> None:
         input_row = {
