@@ -227,6 +227,7 @@ class SourceStats:
     usable_rows: int
     accepted_long_dialogues: int
     rejected_missing_dialogue: int
+    rejected_language: int
     rejected_turn_range: int
     rejected_without_user_turn: int
 
@@ -235,10 +236,11 @@ def select_long_dialogues(
     rows: Iterable[tuple[str, int, dict[str, Any]]],
     *,
     limit: int | None = None,
+    source_language: str | None = None,
 ) -> tuple[list[dict[str, Any]], SourceStats]:
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
-    raw_rows = usable_rows = accepted = missing = turn_range = no_user = 0
+    raw_rows = usable_rows = accepted = missing = language = turn_range = no_user = 0
     selected: list[dict[str, Any]] = []
     for source_file, source_row, row in rows:
         raw_rows += 1
@@ -247,6 +249,13 @@ def select_long_dialogues(
             missing += 1
             continue
         usable_rows += 1
+        row_language = str(row.get("language") or "").strip()
+        if (
+            source_language is not None
+            and row_language.casefold() != source_language.casefold()
+        ):
+            language += 1
+            continue
         if not MIN_TURNS <= len(turns) <= MAX_TURNS:
             turn_range += 1
             continue
@@ -260,6 +269,7 @@ def select_long_dialogues(
                 "session_id": _safe_session_id(source_id),
                 "source_file": source_file,
                 "source_row": source_row,
+                "source_language": row_language or None,
                 "turns": turns,
             }
         )
@@ -271,6 +281,7 @@ def select_long_dialogues(
         usable_rows=usable_rows,
         accepted_long_dialogues=accepted,
         rejected_missing_dialogue=missing,
+        rejected_language=language,
         rejected_turn_range=turn_range,
         rejected_without_user_turn=no_user,
     )
@@ -821,6 +832,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--source-limit", type=int)
+    parser.add_argument("--source-language")
     parser.add_argument("--category-cap", type=int, default=350)
     parser.add_argument("--dedup-encoder", default=DEFAULT_DEDUP_ENCODER)
     parser.add_argument("--dedup-threshold", type=float, default=DEFAULT_DEDUP_THRESHOLD)
@@ -855,7 +867,9 @@ def main() -> int:
     if not snapshot.is_dir():
         raise FileNotFoundError(snapshot)
     selected, source_stats = select_long_dialogues(
-        iter_snapshot_rows(snapshot), limit=args.source_limit
+        iter_snapshot_rows(snapshot),
+        limit=args.source_limit,
+        source_language=args.source_language,
     )
     _write_jsonl(output_dir / "stages" / "long_dialogues.jsonl", selected)
     backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
@@ -911,6 +925,7 @@ def main() -> int:
             "snapshot_dir": str(snapshot),
             "download_patterns": args.download_pattern,
             "turn_range": [MIN_TURNS, MAX_TURNS],
+            "pilot_source_language_filter": args.source_language,
         },
         "paper_defined": {
             "memory_model": PAPER_MEMORY_MODEL,

@@ -159,6 +159,33 @@ class WildChatReconstructionTests(unittest.TestCase):
         self.assertEqual(records[0]["source_conversation_id"], "accepted")
         self.assertEqual(stats.rejected_turn_range, 1)
 
+    def test_optional_pilot_language_filter_uses_source_metadata(self) -> None:
+        def row(identifier: str, language: str) -> tuple[str, int, dict]:
+            return (
+                "source.jsonl",
+                0,
+                {
+                    "conversation_id": identifier,
+                    "language": language,
+                    "conversation": [
+                        {
+                            "role": "user" if index % 2 == 0 else "assistant",
+                            "content": str(index),
+                        }
+                        for index in range(6)
+                    ],
+                },
+            )
+
+        selected, stats = select_long_dialogues(
+            [row("zh", "Chinese"), row("en", "English")],
+            source_language="English",
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["source_conversation_id"], "en")
+        self.assertEqual(selected[0]["source_language"], "English")
+        self.assertEqual(stats.rejected_language, 1)
+
     def test_memory_extraction_matches_personaemp_input_contract(self) -> None:
         record = {
             "session_id": "wc_test",

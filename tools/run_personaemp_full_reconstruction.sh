@@ -107,6 +107,9 @@ fi
 if [[ -n "${PERSONAEMP_SOURCE_LIMIT:-}" ]]; then
   COMMAND+=(--source-limit "$PERSONAEMP_SOURCE_LIMIT")
 fi
+if [[ -n "${PERSONAEMP_SOURCE_LANGUAGE:-}" ]]; then
+  COMMAND+=(--source-language "$PERSONAEMP_SOURCE_LANGUAGE")
+fi
 if [[ "${PERSONAEMP_ENABLE_RECONSTRUCTED_SEMANTIC_DEDUP:-0}" == "1" ]]; then
   COMMAND+=(--enable-reconstructed-semantic-dedup)
 fi
