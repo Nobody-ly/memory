@@ -42,6 +42,17 @@ DOCUMENT_EDITING_PATTERN = re.compile(
     r"|\btranslate\s+(?:this\s+)?(?:into|to|in)\b",
     re.IGNORECASE,
 )
+TRANSIENT_SPEECH_ACT_VALUE_PATTERN = re.compile(
+    r"^(?:the\s+)?user\s+(?:asks?|asked|wants?\s+to\s+know|"
+    r"is\s+curious\s+about|is\s+inquiring\s+about|is\s+looking\s+for|"
+    r"seeks?\s+information\s+about)\b",
+    re.IGNORECASE,
+)
+HYPOTHETICAL_TASK_VALUE_PATTERN = re.compile(
+    r"\b(?:hypothetical|fictional|role[- ]play\s+character|"
+    r"scenario\s+where|a\s+(?:person|boy|girl|man|woman)\s+named)\b",
+    re.IGNORECASE,
+)
 INTENT_ALLOWLIST = (
     "Learning Support",
     "Conversational Engagement",
@@ -443,6 +454,11 @@ def _normalise_memory_item(
     if item_type == "direct" and supporting_indices and all(
         _looks_like_document_editing_task(turns[index]["text"])
         for index in supporting_indices
+    ):
+        return None
+    if item_type == "direct" and (
+        TRANSIENT_SPEECH_ACT_VALUE_PATTERN.search(value)
+        or HYPOTHETICAL_TASK_VALUE_PATTERN.search(value)
     ):
         return None
     evidence = turns[turn_index]["text"]
@@ -1030,6 +1046,14 @@ def main() -> int:
                 "direct_memory_from_only_annotated_turns": False,
                 "repeated_behavior_may_support_implicit_memory": True,
                 "pattern_sha256": prompt_hash(DOCUMENT_EDITING_PATTERN.pattern),
+            },
+            "local_task_content_filters": {
+                "direct_transient_speech_act_value_sha256": prompt_hash(
+                    TRANSIENT_SPEECH_ACT_VALUE_PATTERN.pattern
+                ),
+                "direct_hypothetical_task_value_sha256": prompt_hash(
+                    HYPOTHETICAL_TASK_VALUE_PATTERN.pattern
+                ),
             },
             "semantic_deduplication": {
                 "encoder": args.dedup_encoder,

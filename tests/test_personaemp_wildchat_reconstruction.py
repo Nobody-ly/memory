@@ -173,6 +173,31 @@ class WildChatReconstructionTests(unittest.TestCase):
             )
         )
 
+    def test_direct_transient_or_hypothetical_task_items_are_rejected(self) -> None:
+        turns = [
+            {"role": "user", "text": "What would a hypothetical person do?"},
+            {"role": "assistant", "text": "Here is an example."},
+        ]
+        for value in (
+            "The user is curious about alter-ego naming conventions",
+            "The user describes a hypothetical alter ego named Yazmin",
+        ):
+            item = {
+                "type": "direct",
+                "label": "Thoughts/Curiosity",
+                "value": value,
+                "evidence_turn_index": 0,
+                "supporting_turn_indices": [0],
+            }
+            self.assertIsNone(
+                _normalise_memory_item(
+                    item,
+                    session_id="hypothetical",
+                    turns=turns,
+                    ordinal=1,
+                )
+            )
+
     def test_full_reconstruction_builds_split_stage_after_dataset(self) -> None:
         expected = {
             "dataset_sha256": "fingerprint",
