@@ -33,6 +33,7 @@ WILDCHAT_REVISION = "78acdff91e618128920151298128e3f85d6e423d"
 MIN_TURNS = 6
 MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
+LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v3"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
 DOCUMENT_EDITING_PATTERN = re.compile(
@@ -551,6 +552,7 @@ class PaperMemoryExtractor:
         turns = record["turns"]
         provenance = {
             "model": self.backend.model,
+            "local_normalization_version": LOCAL_NORMALIZATION_VERSION,
             "system_prompt_sha256": prompt_hash(MEMORY_SYSTEM_PROMPT),
             "user_prompt_sha256": prompt_hash(MEMORY_USER_TEMPLATE),
             "schema_sha256": prompt_hash(json.dumps(MEMORY_SCHEMA, sort_keys=True)),
@@ -621,6 +623,7 @@ class PaperMemoryExtractor:
                     "source_revision": WILDCHAT_REVISION,
                     "memory_model": self.backend.model,
                     "memory_prompt_sha256": provenance["system_prompt_sha256"],
+                    "local_normalization_version": LOCAL_NORMALIZATION_VERSION,
                     "manual_annotation_performed": False,
                 },
             }
@@ -1028,6 +1031,7 @@ def main() -> int:
         },
         "reconstructed_settings": {
             "memory_prompt_sha256": prompt_hash(MEMORY_SYSTEM_PROMPT),
+            "local_normalization_version": LOCAL_NORMALIZATION_VERSION,
             "memory_schema_sha256": prompt_hash(json.dumps(MEMORY_SCHEMA, sort_keys=True)),
             "category_cap": args.category_cap,
             "content_rejection_policy": {
