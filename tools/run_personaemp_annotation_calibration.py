@@ -13,7 +13,6 @@ from src.experiments.personaemp.alpsbench_two_stage import (
 from src.experiments.personaemp.wildchat_annotation_pool import (
     AnnotationCheckpoint,
     AnnotationPoolExtractor,
-    PROTOCOL,
     _atomic_json,
     _checkpoint_identity,
     _utc_now,
@@ -96,6 +95,7 @@ def main() -> int:
         default="alpsbench_official_two_stage",
     )
     parser.add_argument("--env-prefix", default="PERSONAEMP_MEMORY")
+    parser.add_argument("--implementation-commit", required=True)
     args = parser.parse_args()
 
     model_rows = _load_jsonl(args.model_input)[: args.limit]
@@ -117,10 +117,11 @@ def main() -> int:
         extractor: Any = AlpsBenchTwoStageExtractor(backend)
     else:
         extractor = AnnotationPoolExtractor(backend, categories, subtypes)
+    checkpoint_identity = _checkpoint_identity(sample, extractor)
     checkpoint = AnnotationCheckpoint(
         args.output_dir / "cache" / "annotation_successes.jsonl",
         args.output_dir / "cache" / "annotation_identity.json",
-        _checkpoint_identity(sample, extractor),
+        checkpoint_identity,
     )
     records, failures, cached = annotate_sample(sample, extractor, checkpoint)
     by_source_key = {
@@ -150,7 +151,11 @@ def main() -> int:
     gold_memories = sum(len(row["gold"]["memory_items"]) for row in references.values() if row["benchmark_id"] in {source["benchmark_id"] for source in sample})
     manifest = {
         "created_at": _utc_now(),
-        "protocol": f"{PROTOCOL}_public_gold_calibration_v1",
+        "protocol": (
+            f"{checkpoint_identity['protocol']}_public_gold_calibration_v1"
+        ),
+        "implementation_commit": args.implementation_commit,
+        "checkpoint_identity": checkpoint_identity,
         "model_input": {
             "path": str(args.model_input.resolve()),
             "sha256": _sha256(args.model_input),
