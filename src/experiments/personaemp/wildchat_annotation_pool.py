@@ -763,6 +763,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--intent-stats", type=Path)
     parser.add_argument("--annotate", action="store_true")
     parser.add_argument("--annotation-limit", type=int)
+    parser.add_argument("--implementation-commit", required=True)
     parser.add_argument("--env-prefix", default="PERSONAEMP_MEMORY")
     return parser
 
@@ -790,10 +791,12 @@ def main() -> int:
             "conversation_merging": False,
         },
         "sample": {"size": args.sample_size, "seed": args.sample_seed},
+        "implementation_commit": args.implementation_commit,
         "source_stats": asdict(stats),
         "annotation_status": "not_requested",
         "table1_direct_comparison_allowed": False,
     }
+    _atomic_json(output / "manifest.json", manifest)
     if args.annotate:
         categories, subtypes = load_intent_taxonomy(args.intent_stats)
         backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
@@ -801,11 +804,26 @@ def main() -> int:
         annotation_sample = _annotation_subset(
             sample, args.annotation_limit, args.sample_seed
         )
+        _write_jsonl(
+            output / "stages" / "annotation_input.jsonl", annotation_sample
+        )
+        checkpoint_identity = _checkpoint_identity(annotation_sample, extractor)
         checkpoint = AnnotationCheckpoint(
             output / "cache" / "annotation_successes.jsonl",
             output / "cache" / "annotation_identity.json",
-            _checkpoint_identity(annotation_sample, extractor),
+            checkpoint_identity,
         )
+        manifest.update(
+            {
+                "annotation_status": "running",
+                "annotation": {
+                    "model": backend.model,
+                    "attempted": len(annotation_sample),
+                    "checkpoint_identity": checkpoint_identity,
+                },
+            }
+        )
+        _atomic_json(output / "manifest.json", manifest)
         records, failures, cached = annotate_sample(
             annotation_sample, extractor, checkpoint
         )
