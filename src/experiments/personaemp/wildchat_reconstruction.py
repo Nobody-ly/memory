@@ -34,7 +34,7 @@ MIN_TURNS = 6
 MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
 MAX_MEMORY_ITEMS = 8
-LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v7"
+LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v8"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
 DOCUMENT_EDITING_PATTERN = re.compile(
@@ -52,7 +52,10 @@ TRANSIENT_SPEECH_ACT_VALUE_PATTERN = re.compile(
     r"instructs?\s+the\s+assistant\s+to|is\s+curious\s+about|"
     r"is\s+inquiring\s+about|is\s+looking\s+for|"
     r"is\s+interested\s+in\s+generating|seeks?\s+(?:factual\s+)?"
-    r"information(?:\s+about|\s+on)?)\b",
+    r"information(?:\s+about|\s+on)?|is\s+seeking\s+an\s+explanation|"
+    r"is\s+checking\s+if|is\s+currently\s+(?:contemplating|curious)|"
+    r"reported\s+encountering\s+an\s+error|specified\s+the\s+exact\s+error|"
+    r"instructed\s+(?:the\s+assistant\s+)?to|repeated\s+the\s+instruction)\b",
     re.IGNORECASE,
 )
 HYPOTHETICAL_TASK_VALUE_PATTERN = re.compile(
@@ -75,6 +78,11 @@ THIRD_PARTY_SUBJECT_VALUE_PATTERN = re.compile(
 )
 SYSTEM_TASK_VALUE_PATTERN = re.compile(
     r"^(?:the\s+)?user\s+(?:operates|defines|configures)\s+an?\s+ai\s+system\b",
+    re.IGNORECASE,
+)
+DIRECT_TASK_FRAGMENT_VALUE_PATTERN = re.compile(
+    r"^(?:requests?\s+or\s+expects?\s+the\s+assistant|"
+    r"contributed\b.*\bcollaborative\s+creative\s+exercise)\b",
     re.IGNORECASE,
 )
 INTENT_ALLOWLIST = (
@@ -489,6 +497,11 @@ def _normalise_memory_item(
         )
         or THIRD_PARTY_SUBJECT_VALUE_PATTERN.search(value)
         or SYSTEM_TASK_VALUE_PATTERN.search(value)
+        or DIRECT_TASK_FRAGMENT_VALUE_PATTERN.search(value)
+        or (
+            label == "UNMAPPED"
+            and len(re.findall(r"\b\w+\b", value, flags=re.UNICODE)) <= 1
+        )
     ):
         return None
     evidence = turns[turn_index]["text"]
@@ -1099,6 +1112,9 @@ def main() -> int:
                 ),
                 "system_task_value_sha256": prompt_hash(
                     SYSTEM_TASK_VALUE_PATTERN.pattern
+                ),
+                "direct_task_fragment_value_sha256": prompt_hash(
+                    DIRECT_TASK_FRAGMENT_VALUE_PATTERN.pattern
                 ),
             },
             "semantic_deduplication": {
