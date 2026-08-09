@@ -33,6 +33,7 @@ from .wildchat_reconstruction import (
 
 
 PROTOCOL = "personaemp_wildchat_annotation_pool_v1"
+SAMPLE_STRATEGY = "balanced_language_length_v1"
 MEMORY_TOP_LEVEL_LABELS = (
     "Personal_Background",
     "States_Experiences",
@@ -338,6 +339,8 @@ class ScanStats:
     sample_records: int
     language_counts: dict[str, int]
     length_bucket_counts: dict[str, int]
+    joint_stratum_counts: dict[str, int]
+    sample_stratum_counts: dict[str, int]
 
 
 def _offer(
@@ -378,6 +381,7 @@ def scan_and_sample(
     eligible_devices: set[str] = set()
     languages: Counter[str] = Counter()
     lengths: Counter[str] = Counter()
+    joint_strata: Counter[str] = Counter()
     for source_file, source_row, row in rows:
         raw_rows += 1
         ip = str(row.get("hashed_ip") or "")
@@ -405,8 +409,10 @@ def scan_and_sample(
             eligible_devices.add(device)
         language = str(row.get("language") or "Unknown")
         length_bucket = _length_bucket(len(messages))
+        language_bucket = _language_bucket(language)
         languages[language] += 1
         lengths[length_bucket] += 1
+        joint_strata[f"{language_bucket}|{length_bucket}"] += 1
         record = _candidate(source_file, source_row, row, messages)
         score = int.from_bytes(
             hashlib.sha256(f"{seed}|{record['source_key']}".encode("utf-8")).digest(),
@@ -414,7 +420,7 @@ def scan_and_sample(
         )
         _offer(global_heap, sample_size, score, record)
         _offer(
-            stratum_heaps[(_language_bucket(language), length_bucket)],
+            stratum_heaps[(language_bucket, length_bucket)],
             per_stratum,
             score,
             record,
@@ -431,6 +437,11 @@ def scan_and_sample(
     sample = sorted(selected.values(), key=lambda value: str(value["source_key"]))[
         :sample_size
     ]
+    sample_strata = Counter(
+        f"{_language_bucket(str(record.get('source_language') or 'Unknown'))}|"
+        f"{_length_bucket(int(record['normalized_message_count']))}"
+        for record in sample
+    )
     stats = ScanStats(
         raw_rows=raw_rows,
         usable_dialogues=usable,
@@ -444,6 +455,8 @@ def scan_and_sample(
         sample_records=len(sample),
         language_counts=dict(languages.most_common()),
         length_bucket_counts=dict(sorted(lengths.items())),
+        joint_stratum_counts=dict(sorted(joint_strata.items())),
+        sample_stratum_counts=dict(sorted(sample_strata.items())),
     )
     return sample, stats
 
@@ -796,7 +809,13 @@ def main() -> int:
             "language_filter": None,
             "conversation_merging": False,
         },
-        "sample": {"size": args.sample_size, "seed": args.sample_seed},
+        "sample": {
+            "size": args.sample_size,
+            "seed": args.sample_seed,
+            "strategy": SAMPLE_STRATEGY,
+            "strata": 20,
+            "target_per_stratum": math.ceil(args.sample_size / 20),
+        },
         "implementation_commit": args.implementation_commit,
         "source_stats": asdict(stats),
         "annotation_status": "not_requested",

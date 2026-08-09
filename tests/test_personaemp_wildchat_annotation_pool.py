@@ -165,6 +165,9 @@ class AnnotationPoolTests(unittest.TestCase):
         self.assertEqual(stats.eligible_raw_messages, 3)
         self.assertEqual(stats.language_counts["English"], 2)
         self.assertEqual(stats.language_counts["Chinese"], 1)
+        self.assertEqual(stats.joint_stratum_counts["English|006-011"], 2)
+        self.assertEqual(stats.joint_stratum_counts["Chinese|006-011"], 1)
+        self.assertEqual(sum(stats.sample_stratum_counts.values()), 3)
         self.assertEqual(len(sample), 3)
 
     def test_sampling_is_stable(self) -> None:
