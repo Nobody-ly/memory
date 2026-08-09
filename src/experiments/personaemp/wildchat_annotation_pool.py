@@ -83,14 +83,30 @@ DEFAULT_INTENT_SUBTYPES = (
     "Other",
 )
 
-ANNOTATION_SYSTEM_PROMPT = """You create structured personalization annotations
-from real human-AI dialogue. Follow the public AlpsBench memory contract. Extract
-only user-grounded information, distinguish direct statements from indirect
-inferences, preserve uncertainty, and cite one concrete utterance for every
-memory. Do not treat assistant claims as user facts. Role-play, quoted text,
-hypothetical scenarios, and one-off task content should not become user facts
-unless the dialogue itself supports a genuine user attribute or recurring
-preference. Return only JSON matching the supplied schema."""
+ANNOTATION_SYSTEM_PROMPT = """You create compact personalization annotations
+from real human-AI dialogue. Follow the public AlpsBench memory contract. A
+memory must be a user-grounded fact, state, experience, relationship, durable
+preference, recurring need, or supported behavioral pattern that could help a
+future assistant personalize its response.
+
+Use direct only for an explicit self-claim about the user. Use indirect for a
+careful inference supported by the dialogue. Preserve uncertainty and cite one
+representative user utterance for every memory. Never treat assistant claims as
+user facts.
+
+Do not extract isolated requests, questions, formatting instructions, budgets
+or constraints for one task, pasted or edited document content, role-play,
+fictional world details, third-party facts, or hypothetical scenarios as user
+memories. Such content may support an indirect recurring pattern only when
+multiple user turns clearly establish it. A resume, biography, or legal record
+supports direct memories only when the user clearly presents it as their own.
+
+Consolidate semantically overlapping observations into one memory at the most
+useful level of abstraction. Do not turn each utterance or each detail of one
+topic into a separate memory. Prefer a small set of distinct, high-signal
+memories; long dialogues may justify more only when they contain genuinely
+different durable user information. Return only JSON matching the supplied
+schema."""
 
 ANNOTATION_USER_TEMPLATE = """Conversation (zero-indexed utterances):
 {conversation}
@@ -100,9 +116,9 @@ Memory labels must begin with one of:
 
 Use UNMAPPED with a concise hierarchical label_suggestion when none fits.
 `type` is `direct` for explicit user information and `indirect` for a supported
-inference. Keep memories compact and non-duplicative; there is no fixed memory
-count. Also rank all applicable dialogue intents using only these categories and
-subtypes.
+inference. Keep memories compact and non-duplicative. Rank only the dominant
+dialogue intents, usually one or two and never more than three, using only these
+categories and subtypes.
 
 Intent categories:
 {intent_categories}
