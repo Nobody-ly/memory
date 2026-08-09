@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from src.experiments.personaemp.client import OpenAICompatibleChatBackend
+from src.experiments.personaemp.alpsbench_two_stage import (
+    AlpsBenchTwoStageExtractor,
+)
 from src.experiments.personaemp.wildchat_annotation_pool import (
     AnnotationCheckpoint,
     AnnotationPoolExtractor,
@@ -87,6 +90,11 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--intent-stats", type=Path)
+    parser.add_argument(
+        "--extractor",
+        choices=("alpsbench_official_two_stage", "reconstructed_one_stage"),
+        default="alpsbench_official_two_stage",
+    )
     parser.add_argument("--env-prefix", default="PERSONAEMP_MEMORY")
     args = parser.parse_args()
 
@@ -105,7 +113,10 @@ def main() -> int:
 
     categories, subtypes = load_intent_taxonomy(args.intent_stats)
     backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
-    extractor = AnnotationPoolExtractor(backend, categories, subtypes)
+    if args.extractor == "alpsbench_official_two_stage":
+        extractor: Any = AlpsBenchTwoStageExtractor(backend)
+    else:
+        extractor = AnnotationPoolExtractor(backend, categories, subtypes)
     checkpoint = AnnotationCheckpoint(
         args.output_dir / "cache" / "annotation_successes.jsonl",
         args.output_dir / "cache" / "annotation_identity.json",
@@ -149,6 +160,7 @@ def main() -> int:
             "sha256": _sha256(args.reference_output),
         },
         "model": backend.model,
+        "extractor": args.extractor,
         "attempted": len(sample),
         "succeeded": len(records),
         "failed": len(failures),

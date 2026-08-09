@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 
 from src.experiments.personaemp.client import ChatResult
+from src.experiments.personaemp.alpsbench_two_stage import (
+    ALPSBENCH_SOURCE_COMMIT,
+    AlpsBenchTwoStageExtractor,
+)
 from src.experiments.personaemp.wildchat_annotation_pool import (
     AnnotationCheckpoint,
     AnnotationPoolExtractor,
@@ -70,6 +74,78 @@ class FixedBackend:
             completion_tokens=1,
             latency_seconds=0.0,
             attempts=1,
+        )
+
+
+class _Message:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _Choice:
+    def __init__(self, content: str) -> None:
+        self.message = _Message(content)
+
+
+class _Completion:
+    def __init__(self, content: str) -> None:
+        self.choices = [_Choice(content)]
+
+
+class _SequentialCompletions:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = payloads
+        self.requests: list[dict] = []
+
+    def create(self, **request):  # type: ignore[no-untyped-def]
+        self.requests.append(request)
+        return _Completion(json.dumps(self.payloads.pop(0)))
+
+
+class _SequentialClient:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.chat = type("Chat", (), {})()
+        self.chat.completions = _SequentialCompletions(payloads)
+
+
+class OfficialBackend:
+    model = PAPER_MEMORY_MODEL
+
+    def __init__(self) -> None:
+        item = {
+            "memory_id": "m1",
+            "type": "direct",
+            "label": "Preferences/Food",
+            "label_suggestion": None,
+            "value": "Prefers tea",
+            "reasoning": "The user states this preference.",
+            "evidence": {
+                "session_id": "placeholder",
+                "utterance_index": 0,
+                "text": "one-0",
+            },
+            "confidence": 0.95,
+            "time_scope": "long_term",
+            "emotion": None,
+            "preference_attitude": "like",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+        self.client = _SequentialClient(
+            [
+                {
+                    "intents_ranked": [
+                        {
+                            "intent_category": "Personal Interaction Intent",
+                            "intent_subtype": "Personal Advice",
+                            "probability": 1.0,
+                            "reasoning": "test",
+                            "evidence": [],
+                        }
+                    ]
+                },
+                {"memory_items": [item]},
+                {"memory_items": [item]},
+            ]
         )
 
 
@@ -198,6 +274,27 @@ class AnnotationPoolTests(unittest.TestCase):
                     root / "identity.json",
                     {"different": True},
                 )
+
+    def test_official_two_stage_adapter_preserves_three_call_protocol(self) -> None:
+        sample, _ = scan_and_sample(
+            [("part.parquet", 0, _row("one", 6))], sample_size=1, seed="fixed"
+        )
+        backend = OfficialBackend()
+        extractor = AlpsBenchTwoStageExtractor(backend)  # type: ignore[arg-type]
+        record = extractor.extract(sample[0])
+        requests = backend.client.chat.completions.requests
+        self.assertEqual(len(requests), 3)
+        self.assertEqual([row["temperature"] for row in requests], [0.1, 0.2, 0.0])
+        self.assertEqual(
+            [row["response_format"] for row in requests],
+            [{"type": "json_object"}] * 3,
+        )
+        self.assertEqual(record["memory_items"][0]["value"], "Prefers tea")
+        self.assertEqual(len(record["memory_stage1_candidates"]), 1)
+        self.assertEqual(
+            record["reconstruction_metadata"]["upstream_commit"],
+            ALPSBENCH_SOURCE_COMMIT,
+        )
 
 
 if __name__ == "__main__":

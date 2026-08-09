@@ -484,13 +484,18 @@ class AnnotationPoolExtractor:
         self.intent_subtypes = intent_subtypes
         self.schema = _annotation_schema(intent_categories, intent_subtypes)
 
-    def provenance(self, source: dict[str, Any]) -> dict[str, str]:
+    def run_identity(self) -> dict[str, Any]:
         return {
             "protocol": PROTOCOL,
             "model": self.backend.model,
             "system_prompt_sha256": prompt_hash(ANNOTATION_SYSTEM_PROMPT),
             "user_template_sha256": prompt_hash(ANNOTATION_USER_TEMPLATE),
             "schema_sha256": prompt_hash(json.dumps(self.schema, sort_keys=True)),
+        }
+
+    def provenance(self, source: dict[str, Any]) -> dict[str, str]:
+        return {
+            **self.run_identity(),
             "conversation_sha256": prompt_hash(_format_conversation(source["turns"])),
         }
 
@@ -740,15 +745,11 @@ def _annotation_subset(
 
 
 def _checkpoint_identity(
-    sample: list[dict[str, Any]], extractor: AnnotationPoolExtractor
+    sample: list[dict[str, Any]], extractor: Any
 ) -> dict[str, Any]:
     source_keys = [str(row["source_key"]) for row in sample]
     return {
-        "protocol": PROTOCOL,
-        "model": extractor.backend.model,
-        "system_prompt_sha256": prompt_hash(ANNOTATION_SYSTEM_PROMPT),
-        "user_template_sha256": prompt_hash(ANNOTATION_USER_TEMPLATE),
-        "schema_sha256": prompt_hash(json.dumps(extractor.schema, sort_keys=True)),
+        **extractor.run_identity(),
         "source_keys_sha256": prompt_hash(json.dumps(source_keys)),
         "source_count": len(source_keys),
     }
@@ -763,6 +764,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--intent-stats", type=Path)
     parser.add_argument("--annotate", action="store_true")
     parser.add_argument("--annotation-limit", type=int)
+    parser.add_argument(
+        "--extractor",
+        choices=("alpsbench_official_two_stage", "reconstructed_one_stage"),
+        default="alpsbench_official_two_stage",
+    )
     parser.add_argument("--implementation-commit", required=True)
     parser.add_argument("--env-prefix", default="PERSONAEMP_MEMORY")
     return parser
@@ -800,7 +806,12 @@ def main() -> int:
     if args.annotate:
         categories, subtypes = load_intent_taxonomy(args.intent_stats)
         backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
-        extractor = AnnotationPoolExtractor(backend, categories, subtypes)
+        if args.extractor == "alpsbench_official_two_stage":
+            from .alpsbench_two_stage import AlpsBenchTwoStageExtractor
+
+            extractor: Any = AlpsBenchTwoStageExtractor(backend)
+        else:
+            extractor = AnnotationPoolExtractor(backend, categories, subtypes)
         annotation_sample = _annotation_subset(
             sample, args.annotation_limit, args.sample_seed
         )
@@ -817,6 +828,7 @@ def main() -> int:
             {
                 "annotation_status": "running",
                 "annotation": {
+                    "extractor": args.extractor,
                     "model": backend.model,
                     "attempted": len(annotation_sample),
                     "checkpoint_identity": checkpoint_identity,
