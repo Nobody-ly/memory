@@ -15,6 +15,7 @@ import hashlib
 import heapq
 import json
 import math
+import os
 from pathlib import Path
 import re
 from typing import Any, Iterable, Iterator
@@ -199,6 +200,36 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         for row in rows:
             destination.write(json.dumps(row, ensure_ascii=False) + "\n")
     temporary.replace(path)
+
+
+def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as destination:
+        destination.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        destination.flush()
+        os.fsync(destination.fileno())
+
+
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"invalid checkpoint JSONL at {path}:{line_number}"
+                ) from exc
+            if not isinstance(row, dict):
+                raise RuntimeError(
+                    f"checkpoint row must be an object at {path}:{line_number}"
+                )
+            rows.append(row)
+    return rows
 
 
 def _normalise_role(value: Any) -> str | None:
@@ -437,6 +468,25 @@ class AnnotationPoolExtractor:
         self.intent_subtypes = intent_subtypes
         self.schema = _annotation_schema(intent_categories, intent_subtypes)
 
+    def provenance(self, source: dict[str, Any]) -> dict[str, str]:
+        return {
+            "protocol": PROTOCOL,
+            "model": self.backend.model,
+            "system_prompt_sha256": prompt_hash(ANNOTATION_SYSTEM_PROMPT),
+            "user_template_sha256": prompt_hash(ANNOTATION_USER_TEMPLATE),
+            "schema_sha256": prompt_hash(json.dumps(self.schema, sort_keys=True)),
+            "conversation_sha256": prompt_hash(_format_conversation(source["turns"])),
+        }
+
+    def cache_key(self, source: dict[str, Any]) -> str:
+        identity = {
+            "source_key": source["source_key"],
+            **self.provenance(source),
+        }
+        return hashlib.sha256(
+            json.dumps(identity, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
     def extract(self, source: dict[str, Any]) -> dict[str, Any]:
         turns = source["turns"]
         prompt = ANNOTATION_USER_TEMPLATE.format(
@@ -453,6 +503,7 @@ class AnnotationPoolExtractor:
             response_schema=self.schema,
         )
         parsed = _parse_json_object(result.content)
+        provenance = self.provenance(source)
         memories: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         for ordinal, item in enumerate(parsed.get("memory_items") or [], 1):
@@ -534,11 +585,70 @@ class AnnotationPoolExtractor:
                 "source_revision": WILDCHAT_REVISION,
                 "source_key": source["source_key"],
                 "memory_and_intent_model": self.backend.model,
-                "memory_prompt_sha256": prompt_hash(ANNOTATION_SYSTEM_PROMPT),
-                "schema_sha256": prompt_hash(json.dumps(self.schema, sort_keys=True)),
+                "memory_prompt_sha256": provenance["system_prompt_sha256"],
+                "memory_user_template_sha256": provenance[
+                    "user_template_sha256"
+                ],
+                "schema_sha256": provenance["schema_sha256"],
+                "conversation_sha256": provenance["conversation_sha256"],
                 "manual_verification": False,
             },
         }
+
+
+class AnnotationCheckpoint:
+    def __init__(
+        self,
+        path: Path,
+        identity_path: Path,
+        identity: dict[str, Any],
+    ) -> None:
+        self.path = path
+        self.identity_path = identity_path
+        if identity_path.is_file():
+            existing = json.loads(identity_path.read_text(encoding="utf-8"))
+            if existing != identity:
+                raise RuntimeError(
+                    "annotation checkpoint belongs to a different sample, model, "
+                    "prompt, schema, or protocol"
+                )
+        else:
+            _atomic_json(identity_path, identity)
+        self.records: dict[str, dict[str, Any]] = {}
+        for row in _load_jsonl(path):
+            cache_key = str(row.get("cache_key") or "")
+            record = row.get("record")
+            if row.get("status") != "success" or not cache_key or not isinstance(
+                record, dict
+            ):
+                raise RuntimeError(f"invalid successful checkpoint row in {path}")
+            previous = self.records.get(cache_key)
+            if previous is not None and previous != record:
+                raise RuntimeError(f"conflicting checkpoint rows for {cache_key}")
+            self.records[cache_key] = record
+
+    def get(self, cache_key: str) -> dict[str, Any] | None:
+        value = self.records.get(cache_key)
+        return dict(value) if value is not None else None
+
+    def save(
+        self, cache_key: str, source_key: str, record: dict[str, Any]
+    ) -> None:
+        existing = self.records.get(cache_key)
+        if existing is not None:
+            if existing != record:
+                raise RuntimeError(f"checkpoint conflict for {cache_key}")
+            return
+        _append_jsonl(
+            self.path,
+            {
+                "cache_key": cache_key,
+                "source_key": source_key,
+                "status": "success",
+                "record": record,
+            },
+        )
+        self.records[cache_key] = record
 
 
 def _bucket_name(record: dict[str, Any]) -> str:
@@ -565,18 +675,67 @@ def write_by_label(output_dir: Path, records: list[dict[str, Any]]) -> dict[str,
 
 
 def annotate_sample(
-    sample: list[dict[str, Any]], extractor: AnnotationPoolExtractor
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    sample: list[dict[str, Any]],
+    extractor: AnnotationPoolExtractor,
+    checkpoint: AnnotationCheckpoint | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], int]:
     records: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
+    cached = 0
     for source in sample:
+        cache_key = extractor.cache_key(source)
+        existing = checkpoint.get(cache_key) if checkpoint is not None else None
+        if existing is not None:
+            records.append(existing)
+            cached += 1
+            continue
         try:
-            records.append(extractor.extract(source))
+            record = extractor.extract(source)
+            if checkpoint is not None:
+                checkpoint.save(
+                    cache_key, str(source["source_key"]), record
+                )
+            records.append(record)
         except Exception as exc:
             failures.append(
-                {"source_key": str(source["source_key"]), "error": str(exc)}
+                {
+                    "source_key": str(source["source_key"]),
+                    "cache_key": cache_key,
+                    "error": str(exc),
+                }
             )
-    return records, failures
+    return records, failures, cached
+
+
+def _annotation_subset(
+    sample: list[dict[str, Any]], limit: int | None, seed: str
+) -> list[dict[str, Any]]:
+    if limit is None:
+        return sample
+    if limit < 1 or limit > len(sample):
+        raise ValueError("annotation_limit must be within the fixed sample size")
+    ranked = sorted(
+        sample,
+        key=lambda row: hashlib.sha256(
+            f"{seed}|annotation|{row['source_key']}".encode("utf-8")
+        ).digest(),
+    )
+    return sorted(ranked[:limit], key=lambda row: str(row["source_key"]))
+
+
+def _checkpoint_identity(
+    sample: list[dict[str, Any]], extractor: AnnotationPoolExtractor
+) -> dict[str, Any]:
+    source_keys = [str(row["source_key"]) for row in sample]
+    return {
+        "protocol": PROTOCOL,
+        "model": extractor.backend.model,
+        "system_prompt_sha256": prompt_hash(ANNOTATION_SYSTEM_PROMPT),
+        "user_template_sha256": prompt_hash(ANNOTATION_USER_TEMPLATE),
+        "schema_sha256": prompt_hash(json.dumps(extractor.schema, sort_keys=True)),
+        "source_keys_sha256": prompt_hash(json.dumps(source_keys)),
+        "source_count": len(source_keys),
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -587,6 +746,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample-seed", default="personaemp-annotation-pool-v1")
     parser.add_argument("--intent-stats", type=Path)
     parser.add_argument("--annotate", action="store_true")
+    parser.add_argument("--annotation-limit", type=int)
     parser.add_argument("--env-prefix", default="PERSONAEMP_MEMORY")
     return parser
 
@@ -622,7 +782,17 @@ def main() -> int:
         categories, subtypes = load_intent_taxonomy(args.intent_stats)
         backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
         extractor = AnnotationPoolExtractor(backend, categories, subtypes)
-        records, failures = annotate_sample(sample, extractor)
+        annotation_sample = _annotation_subset(
+            sample, args.annotation_limit, args.sample_seed
+        )
+        checkpoint = AnnotationCheckpoint(
+            output / "cache" / "annotation_successes.jsonl",
+            output / "cache" / "annotation_identity.json",
+            _checkpoint_identity(annotation_sample, extractor),
+        )
+        records, failures, cached = annotate_sample(
+            annotation_sample, extractor, checkpoint
+        )
         _write_jsonl(output / "stages" / "annotation_records.jsonl", records)
         _write_jsonl(output / "stages" / "annotation_failures.jsonl", failures)
         buckets = write_by_label(output, records)
@@ -633,9 +803,10 @@ def main() -> int:
                 "annotation_status": "complete" if not failures else "incomplete",
                 "annotation": {
                     "model": backend.model,
-                    "attempted": len(sample),
+                    "attempted": len(annotation_sample),
                     "succeeded": len(records),
                     "failed": len(failures),
+                    "loaded_from_checkpoint": cached,
                     "memory_items": memory_items,
                     "intents": intents,
                     "by_label_files": len(buckets),

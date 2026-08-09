@@ -7,10 +7,14 @@ from pathlib import Path
 
 from src.experiments.personaemp.client import ChatResult
 from src.experiments.personaemp.wildchat_annotation_pool import (
+    AnnotationCheckpoint,
     AnnotationPoolExtractor,
     DEFAULT_INTENT_CATEGORIES,
     DEFAULT_INTENT_SUBTYPES,
     PAPER_MEMORY_MODEL,
+    _annotation_subset,
+    _checkpoint_identity,
+    annotate_sample,
     scan_and_sample,
     write_by_label,
 )
@@ -126,6 +130,78 @@ class AnnotationPoolTests(unittest.TestCase):
         self.assertEqual(sum(counts.values()), 1)
         self.assertEqual(len(files), 1)
 
+    def test_annotation_subset_is_stable_and_bounded(self) -> None:
+        sample, _ = scan_and_sample(
+            [("part.parquet", index, _row(str(index), 6)) for index in range(20)],
+            sample_size=20,
+            seed="fixed",
+        )
+        first = _annotation_subset(sample, 7, "fixed")
+        second = _annotation_subset(sample, 7, "fixed")
+        self.assertEqual(
+            [row["source_key"] for row in first],
+            [row["source_key"] for row in second],
+        )
+        self.assertEqual(len(first), 7)
+
+    def test_annotation_checkpoint_resumes_without_duplicate_calls(self) -> None:
+        sample, _ = scan_and_sample(
+            [("part.parquet", index, _row(str(index), 6)) for index in range(3)],
+            sample_size=3,
+            seed="fixed",
+        )
+        backend = FixedBackend()
+        extractor = AnnotationPoolExtractor(
+            backend, DEFAULT_INTENT_CATEGORIES, DEFAULT_INTENT_SUBTYPES
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            identity = _checkpoint_identity(sample, extractor)
+            checkpoint = AnnotationCheckpoint(
+                root / "success.jsonl", root / "identity.json", identity
+            )
+            first, failures, cached = annotate_sample(
+                sample, extractor, checkpoint
+            )
+            resumed = AnnotationCheckpoint(
+                root / "success.jsonl", root / "identity.json", identity
+            )
+            second, second_failures, second_cached = annotate_sample(
+                sample, extractor, resumed
+            )
+            lines = (root / "success.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(first), 3)
+        self.assertEqual(failures, [])
+        self.assertEqual(cached, 0)
+        self.assertEqual(second, first)
+        self.assertEqual(second_failures, [])
+        self.assertEqual(second_cached, 3)
+        self.assertEqual(len(lines), 3)
+
+    def test_annotation_checkpoint_rejects_identity_change(self) -> None:
+        sample, _ = scan_and_sample(
+            [("part.parquet", 0, _row("one", 6))], sample_size=1, seed="fixed"
+        )
+        extractor = AnnotationPoolExtractor(
+            FixedBackend(), DEFAULT_INTENT_CATEGORIES, DEFAULT_INTENT_SUBTYPES
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            AnnotationCheckpoint(
+                root / "success.jsonl",
+                root / "identity.json",
+                _checkpoint_identity(sample, extractor),
+            )
+            with self.assertRaisesRegex(RuntimeError, "different sample"):
+                AnnotationCheckpoint(
+                    root / "success.jsonl",
+                    root / "identity.json",
+                    {"different": True},
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
+    _annotation_subset,
+    _checkpoint_identity,
+    annotate_sample,
