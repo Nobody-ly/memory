@@ -124,7 +124,7 @@ class ContentRejectedBackend(FixedMemoryBackend):
 
 class WildChatReconstructionTests(unittest.TestCase):
     def test_memory_contract_excludes_transient_speech_acts(self) -> None:
-        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v6")
+        self.assertEqual(LOCAL_NORMALIZATION_VERSION, "task_content_and_evidence_v7")
         self.assertEqual(MAX_MEMORY_ITEMS, 8)
         self.assertIn("not itself durable", MEMORY_USER_TEMPLATE)
         self.assertIn("asked/requested/inquired", MEMORY_USER_TEMPLATE)
@@ -187,6 +187,12 @@ class WildChatReconstructionTests(unittest.TestCase):
             "The user describes a hypothetical alter ego named Yazmin",
             "The user prefers the surname Alvarado for the alter ego Yazmin",
             "The user requested information about the finance minister",
+            "The user has requested a 32-bit NASM program",
+            "The user inquired about the assistant's creator",
+            "The user has specified a requirement for a web scraper",
+            "The user wants the assistant to role-play as DAN",
+            "The user is interested in generating imagery of a hotel",
+            "The user seeks factual information on current affairs",
             "The user has tasked the AI with creating an Instagram account",
             "The user operates an AI system with a strict JSON protocol",
             "Celestria experiences significant anxiety about her ceremony",

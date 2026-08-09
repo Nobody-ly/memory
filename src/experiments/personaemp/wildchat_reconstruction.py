@@ -34,7 +34,7 @@ MIN_TURNS = 6
 MAX_TURNS = 249
 PAPER_MEMORY_MODEL = "deepseek-v3.2"
 MAX_MEMORY_ITEMS = 8
-LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v6"
+LOCAL_NORMALIZATION_VERSION = "task_content_and_evidence_v7"
 DEFAULT_DEDUP_ENCODER = "intfloat/e5-base-v2"
 DEFAULT_DEDUP_THRESHOLD = 0.92
 DOCUMENT_EDITING_PATTERN = re.compile(
@@ -46,9 +46,13 @@ DOCUMENT_EDITING_PATTERN = re.compile(
 )
 TRANSIENT_SPEECH_ACT_VALUE_PATTERN = re.compile(
     r"^(?:the\s+)?user\s+(?:asks?|asked|requests?|requested|is\s+asking|"
-    r"wants?\s+to\s+know|has\s+tasked\s+the\s+ai|"
-    r"is\s+curious\s+about|is\s+inquiring\s+about|is\s+looking\s+for|"
-    r"seeks?\s+information\s+about)\b",
+    r"has\s+requested|inquires?|inquired|has\s+specified\s+(?:a\s+)?"
+    r"requirement|specifies\s+(?:a\s+)?requirement|wants?\s+to\s+know|"
+    r"wants?\s+the\s+assistant\s+to|has\s+tasked\s+the\s+ai|"
+    r"instructs?\s+the\s+assistant\s+to|is\s+curious\s+about|"
+    r"is\s+inquiring\s+about|is\s+looking\s+for|"
+    r"is\s+interested\s+in\s+generating|seeks?\s+(?:factual\s+)?"
+    r"information(?:\s+about|\s+on)?)\b",
     re.IGNORECASE,
 )
 HYPOTHETICAL_TASK_VALUE_PATTERN = re.compile(
