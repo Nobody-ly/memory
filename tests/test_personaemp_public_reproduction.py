@@ -40,6 +40,7 @@ from src.experiments.personaemp.splitting import (
 )
 from src.experiments.personaemp.task1_gold_test_reconstruction import (
     PublicMemoryFilter,
+    _terminal_content_rejection_code,
     build_task1_gold_records,
 )
 
@@ -288,6 +289,16 @@ class FakeOfficialPipeline:
 
 
 class PersonaEmpPublicReproductionTests(unittest.TestCase):
+    def test_wrapped_upstream_content_rejection_is_terminal(self) -> None:
+        error = RuntimeError(
+            "OpenAI call failed after retries: BadRequestError("
+            "data_inspection_failed: inappropriate content)"
+        )
+        self.assertEqual(
+            _terminal_content_rejection_code(error),
+            "provider_data_inspection_failed",
+        )
+
     def test_task1_gold_prefilters_public_memory_before_intent_calls(self) -> None:
         first = {
             "benchmark_id": "pass-1",

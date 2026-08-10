@@ -52,6 +52,21 @@ PAPER_DATA_MODEL = "MiniMax-M2.5"
 PAPER_BIG5_MODEL = "deepseek-v4-flash"
 
 
+def _terminal_content_rejection_code(exc: Exception) -> str | None:
+    reason_code = _content_rejection_code(exc)
+    if reason_code is not None:
+        return reason_code
+    # The published AlpsBench retry helper wraps the final provider exception
+    # without preserving its status_code or exception chain.
+    message = str(exc).lower()
+    if (
+        "data_inspection_failed" in message
+        and "inappropriate content" in message
+    ):
+        return "provider_data_inspection_failed"
+    return None
+
+
 def _conversation_from_input(record: dict[str, Any]) -> list[dict[str, Any]]:
     source = record.get("input") or {}
     sessions = source.get("sessions") or []
@@ -223,7 +238,7 @@ class OfficialIntentReconstructor:
                 model=self.backend.model,
             )
         except Exception as exc:
-            reason_code = _content_rejection_code(exc)
+            reason_code = _terminal_content_rejection_code(exc)
             if reason_code is None:
                 raise
             self.cache.save_rejection(cache_key, benchmark_id, reason_code, provenance)
