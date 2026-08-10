@@ -35,7 +35,12 @@ from src.experiments.personaemp.splitting import (
     TRAITS,
     build_ood_split,
     build_random_split_artifacts,
+    fixed_random_test_users,
     random_user_split,
+)
+from src.experiments.personaemp.task1_gold_test_reconstruction import (
+    PublicMemoryFilter,
+    build_task1_gold_records,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +104,21 @@ class FixedEncoder:
 class StubIntentClassifier:
     def classify(self, record: dict[str, Any]) -> list[str]:
         return ["Personal Advice"]
+
+
+class StubOfficialIntentClassifier:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def classify(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        self.calls.append(str(record["benchmark_id"]))
+        return [
+            {
+                "intent_category": "Personal Interaction Intent",
+                "intent_subtype": "Personal Advice",
+                "probability": 1.0,
+            }
+        ]
 
 
 class StructuredBackend:
@@ -268,6 +288,95 @@ class FakeOfficialPipeline:
 
 
 class PersonaEmpPublicReproductionTests(unittest.TestCase):
+    def test_task1_gold_prefilters_public_memory_before_intent_calls(self) -> None:
+        first = {
+            "benchmark_id": "pass-1",
+            "task": "task1",
+            "session_id": "session-1",
+            "input": {
+                "line_index": 1,
+                "sessions": [{"session_id": "session-1", "turns": []}],
+                "dialogue": [],
+            },
+        }
+        second = {
+            "benchmark_id": "reject-1",
+            "task": "task1",
+            "session_id": "session-2",
+            "input": {
+                "line_index": 2,
+                "sessions": [{"session_id": "session-2", "turns": []}],
+                "dialogue": [],
+            },
+        }
+        references = [
+            {
+                "benchmark_id": "pass-1",
+                "gold": {
+                    "memory_items": [
+                        {
+                            "label": "States_Experiences/Mental_State",
+                            "label_suggestion": None,
+                            "value": "Feels overwhelmed",
+                        }
+                    ]
+                },
+            },
+            {
+                "benchmark_id": "reject-1",
+                "gold": {
+                    "memory_items": [
+                        {
+                            "label": "Preferences/Food",
+                            "label_suggestion": None,
+                            "value": "Likes pasta",
+                        }
+                    ]
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            official = root / "official" / "prepare_dataset"
+            official.mkdir(parents=True)
+            (official / "filter_list.py").write_text(
+                "memory_label_list = ['States_Experiences']\n"
+                "key_words_for_unmatched = ['support']\n",
+                encoding="utf-8",
+            )
+            input_path = root / "input.jsonl"
+            reference_path = root / "reference.jsonl"
+            input_path.write_text(
+                "\n".join(json.dumps(value) for value in (first, second)) + "\n",
+                encoding="utf-8",
+            )
+            reference_path.write_text(
+                "\n".join(json.dumps(value) for value in references) + "\n",
+                encoding="utf-8",
+            )
+            classifier = StubOfficialIntentClassifier()
+            records, stats = build_task1_gold_records(
+                [(input_path, reference_path)],
+                classifier,  # type: ignore[arg-type]
+                PublicMemoryFilter(root / "official"),
+            )
+
+        self.assertEqual(classifier.calls, ["pass-1"])
+        self.assertEqual(stats.source_rows, 2)
+        self.assertEqual(stats.memory_filter_pass, 1)
+        self.assertEqual(stats.memory_filter_rejected, 1)
+        self.assertEqual(stats.intent_rows_attempted, 1)
+        self.assertEqual(records[0]["reconstruction_metadata"]["memory_source"], "public_task1_gold")
+
+    def test_fixed_random_test_users_uses_absolute_count(self) -> None:
+        users = [f"user-{index:03d}" for index in range(400)]
+        first = fixed_random_test_users(users, target_users=278, seed=20260810)
+        second = fixed_random_test_users(users, target_users=278, seed=20260810)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 278)
+        with self.assertRaises(ValueError):
+            fixed_random_test_users(users[:277], target_users=278)
+
     def test_official_pipeline_chunks_resume_without_repeating_calls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
