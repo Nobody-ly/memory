@@ -65,6 +65,7 @@ COMMAND=(
   --intent-env-prefix PERSONAEMP_MEMORY
   --data-env-prefix PERSONAEMP_DATA
   --big5-env-prefix PERSONAEMP_BIG5
+  --intent-workers 4
   --target-test-users 278
 )
 

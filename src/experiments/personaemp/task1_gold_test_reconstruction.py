@@ -10,6 +10,7 @@ test-only Random/OOD artifacts and never materialises train data.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -17,6 +18,7 @@ import os
 from pathlib import Path
 import runpy
 import sys
+import threading
 from typing import Any, Iterable
 
 from .alpsbench_two_stage import (
@@ -98,6 +100,7 @@ class PublicMemoryFilter:
 class OfficialIntentCache:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._lock = threading.Lock()
         self.values: dict[str, list[dict[str, Any]]] = {}
         self.rejections: dict[str, str] = {}
         if not path.is_file():
@@ -124,20 +127,21 @@ class OfficialIntentCache:
         intents_ranked: list[dict[str, Any]],
         provenance: dict[str, Any],
     ) -> None:
-        if cache_key in self.values or cache_key in self.rejections:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        row = {
-            "cache_key": cache_key,
-            "benchmark_id": benchmark_id,
-            "intents_ranked": intents_ranked,
-            "provenance": provenance,
-        }
-        with self.path.open("a", encoding="utf-8", newline="\n") as destination:
-            destination.write(json.dumps(row, ensure_ascii=False) + "\n")
-            destination.flush()
-            os.fsync(destination.fileno())
-        self.values[cache_key] = intents_ranked
+        with self._lock:
+            if cache_key in self.values or cache_key in self.rejections:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "cache_key": cache_key,
+                "benchmark_id": benchmark_id,
+                "intents_ranked": intents_ranked,
+                "provenance": provenance,
+            }
+            with self.path.open("a", encoding="utf-8", newline="\n") as destination:
+                destination.write(json.dumps(row, ensure_ascii=False) + "\n")
+                destination.flush()
+                os.fsync(destination.fileno())
+            self.values[cache_key] = intents_ranked
 
     def save_rejection(
         self,
@@ -146,21 +150,22 @@ class OfficialIntentCache:
         reason_code: str,
         provenance: dict[str, Any],
     ) -> None:
-        if cache_key in self.values or cache_key in self.rejections:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        row = {
-            "cache_key": cache_key,
-            "benchmark_id": benchmark_id,
-            "status": "content_rejected",
-            "reason_code": reason_code,
-            "provenance": provenance,
-        }
-        with self.path.open("a", encoding="utf-8", newline="\n") as destination:
-            destination.write(json.dumps(row, ensure_ascii=False) + "\n")
-            destination.flush()
-            os.fsync(destination.fileno())
-        self.rejections[cache_key] = reason_code
+        with self._lock:
+            if cache_key in self.values or cache_key in self.rejections:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "cache_key": cache_key,
+                "benchmark_id": benchmark_id,
+                "status": "content_rejected",
+                "reason_code": reason_code,
+                "provenance": provenance,
+            }
+            with self.path.open("a", encoding="utf-8", newline="\n") as destination:
+                destination.write(json.dumps(row, ensure_ascii=False) + "\n")
+                destination.flush()
+                os.fsync(destination.fileno())
+            self.rejections[cache_key] = reason_code
 
 
 class OfficialIntentReconstructor:
@@ -171,6 +176,7 @@ class OfficialIntentReconstructor:
             raise ValueError(f"intent model must be {PAPER_MEMORY_MODEL}; got {backend.model}")
         self.backend = backend
         self.cache = cache
+        upstream_adapter.upstream.client = self.backend.client
 
     def _identity(self, record: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         turns = _conversation_from_input(record)
@@ -210,7 +216,6 @@ class OfficialIntentReconstructor:
             "ended_at": None,
             "turns": _conversation_from_input(record),
         }
-        upstream_adapter.upstream.client = self.backend.client
         try:
             result = upstream_adapter.upstream.analyze_intents(
                 session,
@@ -256,11 +261,15 @@ def build_task1_gold_records(
     memory_filter: PublicMemoryFilter,
     *,
     source_limit: int | None = None,
+    intent_workers: int = 1,
     intent_failures: list[dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], Task1GoldStats]:
     if source_limit is not None and source_limit <= 0:
         raise ValueError("source_limit must be positive")
+    if intent_workers < 1:
+        raise ValueError("intent_workers must be positive")
     output: list[dict[str, Any]] = []
+    candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     seen: set[str] = set()
     source_rows = joined = public_memory = memory_pass = intent_attempted = 0
     content_rejections = 0
@@ -288,37 +297,54 @@ def build_task1_gold_records(
             if not memory_filter.accepts(memories):
                 continue
             memory_pass += 1
-            intent_attempted += 1
-            try:
-                intents = classifier.classify(row)
-            except RuntimeError as exc:
-                if "provider_data_inspection_failed" not in str(exc):
-                    raise
-                content_rejections += 1
-                if intent_failures is not None:
-                    intent_failures.append({
-                        "benchmark_id": benchmark_id,
-                        "stage": "intent_reconstruction",
-                        "reason_code": str(exc),
-                    })
-                continue
-            source_input = row.get("input") or {}
-            output.append({
-                "benchmark_id": benchmark_id,
-                "line_index": source_input.get("line_index"),
-                "sessions": source_input.get("sessions") or [],
-                "dialogue": source_input.get("dialogue") or [],
-                "memory_items": memories,
-                "intents_ranked": intents,
-                "reconstruction_metadata": {
-                    "source_task": row.get("task"),
-                    "source_session_id": row.get("session_id"),
-                    "source_revision": ALPSBENCH_REVISION,
-                    "memory_source": "public_task1_gold",
-                    "memory_filter_source_sha256": memory_filter.source_sha256,
-                    "intent_source": "published_alpsbench_intent_prompt_only",
-                },
-            })
+            candidates.append((row, memories))
+    intent_attempted = len(candidates)
+
+    def classify_candidate(
+        candidate: tuple[dict[str, Any], list[dict[str, Any]]],
+    ) -> tuple[str, Any]:
+        row, _ = candidate
+        try:
+            return "ok", classifier.classify(row)
+        except RuntimeError as exc:
+            if "provider_data_inspection_failed" in str(exc):
+                return "content_rejected", str(exc)
+            return "error", exc
+
+    with ThreadPoolExecutor(max_workers=intent_workers) as executor:
+        results = list(executor.map(classify_candidate, candidates))
+    for (row, memories), (status, value) in zip(candidates, results):
+        benchmark_id = str(row.get("benchmark_id") or "")
+        if status == "error":
+            raise value
+        if status == "content_rejected":
+            content_rejections += 1
+            if intent_failures is not None:
+                intent_failures.append({
+                    "benchmark_id": benchmark_id,
+                    "stage": "intent_reconstruction",
+                    "reason_code": str(value),
+                })
+            continue
+        intents = value
+        source_input = row.get("input") or {}
+        output.append({
+            "benchmark_id": benchmark_id,
+            "line_index": source_input.get("line_index"),
+            "sessions": source_input.get("sessions") or [],
+            "dialogue": source_input.get("dialogue") or [],
+            "memory_items": memories,
+            "intents_ranked": intents,
+            "reconstruction_metadata": {
+                "source_task": row.get("task"),
+                "source_session_id": row.get("session_id"),
+                "source_revision": ALPSBENCH_REVISION,
+                "memory_source": "public_task1_gold",
+                "memory_filter_source_sha256": memory_filter.source_sha256,
+                "intent_source": "published_alpsbench_intent_prompt_only",
+                "intent_workers": intent_workers,
+            },
+        })
     return output, Task1GoldStats(
         source_rows=source_rows,
         joined_rows=joined,
@@ -342,6 +368,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapt-only", action="store_true")
     parser.add_argument("--skip-splits", action="store_true")
     parser.add_argument("--source-limit", type=int)
+    parser.add_argument("--intent-workers", type=int, default=4)
     parser.add_argument("--target-test-users", type=int, default=PAPER_TEST_TARGET_USERS)
     return parser
 
@@ -365,6 +392,7 @@ def main() -> int:
         classifier,
         memory_filter,
         source_limit=args.source_limit,
+        intent_workers=args.intent_workers,
         intent_failures=failures,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -426,6 +454,7 @@ def main() -> int:
         },
         "intent": {
             "model": intent_backend.model,
+            "workers": args.intent_workers,
             "protocol": ALPSBENCH_INTENT_PROTOCOL,
             "upstream_commit": ALPSBENCH_SOURCE_COMMIT,
             "upstream_source_sha256": ALPSBENCH_ORIGINAL_SOURCE_SHA256,
