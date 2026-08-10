@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import threading
 from typing import Any, Iterable
@@ -378,6 +379,13 @@ def main() -> int:
     output_dir = args.output_dir.resolve()
     official_repo = args.official_repo.resolve()
     verify_official_checkout(official_repo)
+    repository_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
     download_dir = (args.download_dir or output_dir / "downloads").resolve()
     pairs = download_public_task1(download_dir)
     memory_filter = PublicMemoryFilter(official_repo)
@@ -440,6 +448,7 @@ def main() -> int:
     manifest = {
         "created_at": _utc_now(),
         "protocol": "personaemp_public_task1_gold_test_only_v1",
+        "repository_commit": repository_commit,
         "official_commit": "b555447f267b8057039aab39a4be44725718ea7f",
         "alpsbench_revision": ALPSBENCH_REVISION,
         "source_files": [
