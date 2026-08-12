@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import signal
 import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -13,10 +15,12 @@ from src.experiments.realtalk_ours import (
     EXPECTED_FULL_TARGETS,
     EXPECTED_MODEL,
     EXPECTED_SPEAKER_TARGETS,
+    ModelCallHardTimeout,
     RealTalkOursConfig,
     _action_contract,
     _behavioral_self_domain,
     _behavior_calibration,
+    _call_with_hard_timeout,
     _profile_activation_whitelist,
     _validate_decision_context,
     _prepare_dataset,
@@ -156,6 +160,28 @@ class FakeLabels:
 
 
 class RealTalkOursTests(unittest.TestCase):
+    def test_model_call_hard_timeout_interrupts_stalled_operation(self):
+        if not hasattr(signal, "SIGALRM"):
+            self.skipTest("POSIX hard-timeout signal is unavailable")
+        started = time.monotonic()
+        with self.assertRaisesRegex(ModelCallHardTimeout, "stalled"):
+            _call_with_hard_timeout(
+                lambda: (time.sleep(2), None)[1],
+                1,
+                "stalled",
+            )
+        self.assertLess(time.monotonic() - started, 1.8)
+
+    def test_resume_requires_existing_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = RealTalkOursConfig(
+                output_dir=str(Path(directory) / "missing"),
+                resume=True,
+                compute_local_metrics=False,
+            )
+            with self.assertRaisesRegex(ValueError, "existing checkpoint"):
+                run_realtalk_ours(config, backend=FakeBackend())
+
     def test_even_session_sampler_uses_positions_only(self):
         points = [
             {"target_session": session, "sample_id": f"{session}-{index}"}

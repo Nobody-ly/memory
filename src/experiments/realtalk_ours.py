@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import statistics
 import subprocess
 from dataclasses import asdict, dataclass
@@ -279,6 +280,9 @@ class RealTalkOursConfig:
     continue_on_error: bool = True
     preflight_only: bool = False
     fresh: bool = False
+    resume: bool = False
+    decision_thinking: bool = True
+    model_call_timeout_seconds: int = 240
 
 
 def run_realtalk_ours(
@@ -293,6 +297,8 @@ def run_realtalk_ours(
     output_dir.mkdir(parents=True, exist_ok=True)
     if config.fresh:
         _clear_runtime_artifacts(output_dir)
+    elif config.resume and not (output_dir / "checkpoint.json").exists():
+        raise ValueError("--resume requires an existing checkpoint.json")
 
     backend = backend or _backend_from_env()
     if getattr(backend, "model", None) != EXPECTED_MODEL:
@@ -300,7 +306,12 @@ def run_realtalk_ours(
             f"REALTALK Ours requires exact model {EXPECTED_MODEL!r}; "
             f"got {getattr(backend, 'model', None)!r}"
         )
-    preflight = _run_preflight(output_dir, backend)
+    preflight = _run_preflight(
+        output_dir,
+        backend,
+        config.decision_thinking,
+        config.model_call_timeout_seconds,
+    )
     if config.preflight_only:
         return preflight
 
@@ -348,6 +359,7 @@ def run_realtalk_ours(
                 max_attempts=config.operation_max_attempts,
                 raw_audit=raw_audit,
                 enable_thinking=False,
+                hard_timeout_seconds=config.model_call_timeout_seconds,
             )
         except Exception as exc:
             failure = _failure("self_domain", speaker, None, exc)
@@ -394,6 +406,7 @@ def run_realtalk_ours(
                         max_attempts=config.operation_max_attempts,
                         raw_audit=raw_audit,
                         enable_thinking=False,
+                        hard_timeout_seconds=config.model_call_timeout_seconds,
                     )
                     user_domain = update_envelope["data"]
                     allowed_partner_turn_ids = allowed_after_update
@@ -432,7 +445,8 @@ def run_realtalk_ours(
                     max_tokens=1600,
                     max_attempts=config.operation_max_attempts,
                     raw_audit=raw_audit,
-                    enable_thinking=True,
+                    enable_thinking=config.decision_thinking,
+                    hard_timeout_seconds=config.model_call_timeout_seconds,
                 )
                 decision = alignment_envelope["data"]
                 generation_envelope = _text_call(
@@ -455,6 +469,7 @@ def run_realtalk_ours(
                     max_attempts=config.operation_max_attempts,
                     raw_audit=raw_audit,
                     enable_thinking=False,
+                    hard_timeout_seconds=config.model_call_timeout_seconds,
                 )
                 result = {
                     "result_id": result_id,
@@ -681,7 +696,12 @@ def _prepare_dataset(
     return manifest, prepared
 
 
-def _run_preflight(output_dir: Path, backend: ChatBackend) -> dict[str, Any]:
+def _run_preflight(
+    output_dir: Path,
+    backend: ChatBackend,
+    decision_thinking: bool,
+    hard_timeout_seconds: int,
+) -> dict[str, Any]:
     path = output_dir / "preflight.json"
     if path.exists():
         value = _load_json(path)
@@ -690,7 +710,7 @@ def _run_preflight(output_dir: Path, backend: ChatBackend) -> dict[str, Any]:
             and value.get("stage_thinking") == {
                 "self_domain": False,
                 "user_domain": False,
-                "decision": False,
+                "decision": decision_thinking,
                 "generation": False,
             }
             and value.get("nonthinking_generation_succeeded") is True
@@ -702,13 +722,17 @@ def _run_preflight(output_dir: Path, backend: ChatBackend) -> dict[str, Any]:
         raise ValueError(
             f"configured credential cannot access {EXPECTED_MODEL}; visible={available[:20]}"
         )
-    response = backend.chat(
-        "Return exactly READY.",
-        "READY",
-        temperature=0.0,
-        top_p=0.9,
-        max_tokens=8,
-        enable_thinking=False,
+    response = _call_with_hard_timeout(
+        lambda: backend.chat(
+            "Return exactly READY.",
+            "READY",
+            temperature=0.0,
+            top_p=0.9,
+            max_tokens=8,
+            enable_thinking=False,
+        ),
+        hard_timeout_seconds,
+        "preflight",
     )
     if "READY" not in response.content.upper():
         raise ValueError(f"minimal model preflight failed: {response.content!r}")
@@ -719,7 +743,7 @@ def _run_preflight(output_dir: Path, backend: ChatBackend) -> dict[str, Any]:
         "stage_thinking": {
             "self_domain": False,
             "user_domain": False,
-            "decision": False,
+            "decision": decision_thinking,
             "generation": False,
         },
         "model_visible": True,
@@ -743,6 +767,7 @@ def _structured_call(
     max_attempts: int,
     raw_audit: Path,
     enable_thinking: bool,
+    hard_timeout_seconds: int = 0,
 ) -> dict[str, Any]:
     repair = {"raw": "", "error": ""}
     logical_attempt = {"value": 0}
@@ -754,14 +779,18 @@ def _structured_call(
             prompt += FORMAT_REPAIR_TEMPLATE.format(
                 error=repair["error"], raw=repair["raw"][:12000]
             )
-        return backend.chat(
-            system_prompt,
-            prompt,
-            temperature=0.2,
-            top_p=0.9,
-            max_tokens=max_tokens,
-            response_schema=schema,
-            enable_thinking=enable_thinking,
+        return _call_with_hard_timeout(
+            lambda: backend.chat(
+                system_prompt,
+                prompt,
+                temperature=0.2,
+                top_p=0.9,
+                max_tokens=max_tokens,
+                response_schema=schema,
+                enable_thinking=enable_thinking,
+            ),
+            hard_timeout_seconds,
+            operation_key,
         )
 
     def validate(result: ChatResult) -> dict[str, Any]:
@@ -808,6 +837,40 @@ def _structured_call(
     )
 
 
+class ModelCallHardTimeout(TimeoutError):
+    """Raised when an upstream SDK call exceeds the experiment watchdog."""
+
+
+class _HardTimeoutInterrupt(BaseException):
+    """Escapes SDK retry loops that catch ordinary Exception subclasses."""
+
+
+def _call_with_hard_timeout(
+    operation: Callable[[], ChatResult],
+    timeout_seconds: int,
+    operation_key: str,
+) -> ChatResult:
+    if timeout_seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        return operation()
+
+    def timeout_handler(_signum: int, _frame: Any) -> None:
+        raise _HardTimeoutInterrupt()
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        try:
+            return operation()
+        except _HardTimeoutInterrupt as exc:
+            raise ModelCallHardTimeout(
+                f"model call {operation_key!r} exceeded {timeout_seconds}s hard timeout"
+            ) from exc
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def _text_call(
     *,
     checkpoint: OperationCheckpoint,
@@ -819,18 +882,23 @@ def _text_call(
     max_attempts: int,
     raw_audit: Path,
     enable_thinking: bool,
+    hard_timeout_seconds: int = 0,
 ) -> dict[str, Any]:
     logical_attempt = {"value": 0}
 
     def operation() -> ChatResult:
         logical_attempt["value"] += 1
-        return backend.chat(
-            system_prompt,
-            user_prompt,
-            temperature=0.6,
-            top_p=0.9,
-            max_tokens=300,
-            enable_thinking=enable_thinking,
+        return _call_with_hard_timeout(
+            lambda: backend.chat(
+                system_prompt,
+                user_prompt,
+                temperature=0.6,
+                top_p=0.9,
+                max_tokens=300,
+                enable_thinking=enable_thinking,
+            ),
+            hard_timeout_seconds,
+            operation_key,
         )
 
     def validate(result: ChatResult) -> dict[str, Any]:
@@ -991,7 +1059,7 @@ def _write_generation_outputs(
     _write_json(output_dir / "dataset_manifest.json", dataset_manifest)
     _write_json(output_dir / "run_manifest.json", {
         "created_at_utc": _now(),
-        "protocol": "realtalk_task1_ours_agentic_v5_statistically_calibrated_thinking_decision",
+        "protocol": "realtalk_task1_ours_agentic_v6_runtime_reliable",
         "comparison_status": "protocol_aligned_not_runtime_identical",
         "paper_persona_simulation_model_disclosed": False,
         "implementation_repository_commit": _repository_commit(),
@@ -1000,7 +1068,7 @@ def _write_generation_outputs(
         "stage_thinking": {
             "self_domain": False,
             "user_domain": False,
-            "decision": False,
+            "decision": config.decision_thinking,
             "generation": False,
         },
         "training_or_finetuning": False,
@@ -1375,7 +1443,9 @@ def _run_signature(
     dataset_manifest: dict[str, Any],
 ) -> str:
     cfg = asdict(config)
-    for key in ("output_dir", "fresh", "continue_on_error", "preflight_only"):
+    for key in (
+        "output_dir", "fresh", "resume", "continue_on_error", "preflight_only"
+    ):
         cfg.pop(key, None)
     return stable_hash({
         "config": cfg,
@@ -1383,7 +1453,7 @@ def _run_signature(
         "stage_thinking": {
             "self_domain": False,
             "user_domain": False,
-            "decision": False,
+            "decision": config.decision_thinking,
             "generation": False,
         },
         "dataset_manifest": dataset_manifest,
@@ -1430,6 +1500,8 @@ def _validate_config(config: RealTalkOursConfig) -> None:
         raise ValueError("main REALTALK Ours protocol requires exactly three Ca and Cb sessions")
     if config.operation_max_attempts != 3:
         raise ValueError("structured logical attempts are fixed at three")
+    if config.model_call_timeout_seconds < 30:
+        raise ValueError("model_call_timeout_seconds must be at least 30")
     if config.max_eval_points_per_speaker < 0:
         raise ValueError("max_eval_points_per_speaker must be non-negative")
     if config.eval_points_per_session < 0:
@@ -1637,7 +1709,15 @@ def parse_args() -> RealTalkOursConfig:
     parser.add_argument("--skip-bertscore", action="store_true")
     parser.add_argument("--stop-on-error", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
-    parser.add_argument("--fresh", action="store_true")
+    run_mode = parser.add_mutually_exclusive_group(required=True)
+    run_mode.add_argument("--fresh", action="store_true")
+    run_mode.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--decision-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--model-call-timeout-seconds", type=int, default=240)
     args = parser.parse_args()
     return RealTalkOursConfig(
         dataset_dir=args.dataset_dir,
@@ -1651,6 +1731,9 @@ def parse_args() -> RealTalkOursConfig:
         continue_on_error=not args.stop_on_error,
         preflight_only=args.preflight_only,
         fresh=args.fresh,
+        resume=args.resume,
+        decision_thinking=args.decision_thinking,
+        model_call_timeout_seconds=args.model_call_timeout_seconds,
     )
 
 
