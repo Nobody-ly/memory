@@ -49,6 +49,7 @@ from ..metrics import compute_rouge_l
 
 
 EXPECTED_MODEL = "qwen3-max-2026-01-23"
+ALLOWED_MODELS = frozenset({EXPECTED_MODEL, "deepseek-v4-flash"})
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_FULL_TARGETS = 519
 EXPECTED_SPEAKER_TARGETS = {
@@ -303,6 +304,7 @@ class RealTalkOursConfig:
     resume: bool = False
     decision_thinking: bool = True
     model_call_timeout_seconds: int = 240
+    model: str = EXPECTED_MODEL
 
 
 def run_realtalk_ours(
@@ -320,15 +322,18 @@ def run_realtalk_ours(
     elif config.resume and not (output_dir / "checkpoint.json").exists():
         raise ValueError("--resume requires an existing checkpoint.json")
 
-    backend = backend or _backend_from_env()
-    if getattr(backend, "model", None) != EXPECTED_MODEL:
+    backend = backend or _backend_from_env(config.model)
+    if config.model not in ALLOWED_MODELS:
+        raise ValueError(f"unsupported Ours model {config.model!r}")
+    if getattr(backend, "model", None) != config.model:
         raise ValueError(
-            f"REALTALK Ours requires exact model {EXPECTED_MODEL!r}; "
+            f"REALTALK Ours requires exact configured model {config.model!r}; "
             f"got {getattr(backend, 'model', None)!r}"
         )
     preflight = _run_preflight(
         output_dir,
         backend,
+        config.model,
         config.decision_thinking,
         config.model_call_timeout_seconds,
     )
@@ -564,7 +569,7 @@ def run_realtalk_ours(
         _write_json(output_dir / "GENERATION_COMPLETE", {
             "completed_at_utc": _now(),
             "records": len(results),
-            "model": EXPECTED_MODEL,
+            "model": backend.model,
             "run_signature": signature,
         })
     else:
@@ -727,6 +732,7 @@ def _prepare_dataset(
 def _run_preflight(
     output_dir: Path,
     backend: ChatBackend,
+    expected_model: str,
     decision_thinking: bool,
     hard_timeout_seconds: int,
 ) -> dict[str, Any]:
@@ -734,7 +740,7 @@ def _run_preflight(
     if path.exists():
         value = _load_json(path)
         if (
-            value.get("model") == EXPECTED_MODEL
+            value.get("model") == expected_model
             and value.get("stage_thinking") == {
                 "self_domain": False,
                 "user_domain": False,
@@ -746,9 +752,9 @@ def _run_preflight(
             return value
     available_fn = getattr(backend, "available_models", None)
     available = list(available_fn()) if callable(available_fn) else [backend.model]
-    if EXPECTED_MODEL not in available:
+    if expected_model not in available:
         raise ValueError(
-            f"configured credential cannot access {EXPECTED_MODEL}; visible={available[:20]}"
+            f"configured credential cannot access {expected_model}; visible={available[:20]}"
         )
     response = _call_with_hard_timeout(
         lambda: backend.chat(
@@ -1091,7 +1097,7 @@ def _write_generation_outputs(
         "comparison_status": "protocol_aligned_not_runtime_identical",
         "paper_persona_simulation_model_disclosed": False,
         "implementation_repository_commit": _repository_commit(),
-        "ours_model": EXPECTED_MODEL,
+        "ours_model": backend.model,
         "all_ours_stages_use_same_model": True,
         "stage_thinking": {
             "self_domain": False,
@@ -1451,14 +1457,14 @@ def _normalize_bertscore(value: Any, expected: int) -> list[float]:
     return normalized
 
 
-def _backend_from_env() -> OpenAICompatibleChatBackend:
+def _backend_from_env(model: str = EXPECTED_MODEL) -> OpenAICompatibleChatBackend:
     def env(name: str, fallback: str = "") -> str:
         return os.getenv(f"REALTALK_OURS_{name}", fallback).strip()
 
     return OpenAICompatibleChatBackend(
         api_key=env("API_KEY", os.getenv("API_KEY", "")),
         base_url=env("BASE_URL", os.getenv("BASE_URL", "")),
-        model=env("MODEL", EXPECTED_MODEL),
+        model=model,
         timeout_seconds=float(env("TIMEOUT_SECONDS", "180")),
         max_attempts=int(env("NETWORK_MAX_ATTEMPTS", "6")),
         enable_thinking=False,
@@ -1768,6 +1774,7 @@ def parse_args() -> RealTalkOursConfig:
         default=True,
     )
     parser.add_argument("--model-call-timeout-seconds", type=int, default=240)
+    parser.add_argument("--model", choices=sorted(ALLOWED_MODELS), default=EXPECTED_MODEL)
     args = parser.parse_args()
     return RealTalkOursConfig(
         dataset_dir=args.dataset_dir,
@@ -1784,6 +1791,7 @@ def parse_args() -> RealTalkOursConfig:
         resume=args.resume,
         decision_thinking=args.decision_thinking,
         model_call_timeout_seconds=args.model_call_timeout_seconds,
+        model=args.model,
     )
 
 
