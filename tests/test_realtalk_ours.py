@@ -16,6 +16,7 @@ from src.experiments.realtalk_ours import (
     RealTalkOursConfig,
     _action_contract,
     _behavioral_self_domain,
+    _behavior_calibration,
     _profile_activation_whitelist,
     _validate_decision_context,
     _prepare_dataset,
@@ -108,7 +109,7 @@ class FakeBackend:
             "system": system_prompt, "user": user_prompt, "schema": schema_name,
             "max_tokens": max_tokens, "enable_thinking": enable_thinking,
         })
-        if schema_name == "realtalk_ours_agentic_self_domain_v3":
+        if schema_name == "realtalk_ours_agentic_self_domain_v4":
             if self.malformed_self_once and sum(c["schema"] == schema_name for c in self.calls) == 1:
                 content = "not-json"
             else:
@@ -225,6 +226,32 @@ class RealTalkOursTests(unittest.TestCase):
         self.assertNotIn("identity_context", view)
         self.assertNotIn("boundaries_and_uncertainty", view)
         self.assertIn("communication_signature", view)
+        self.assertEqual(
+            view["deterministic_behavior_calibration"]["question_tendency"],
+            "rare_without_a_direct_need",
+        )
+
+    def test_behavior_calibration_uses_observed_rates_and_scale(self):
+        value = _behavior_calibration({
+            "question_rate": 0.8,
+            "reflective_marker_rate": 0.05,
+            "evaluative_opener_rate": 0.0,
+            "mean_characters": 200.0,
+            "median_characters": 300.0,
+        })
+        self.assertEqual(
+            value["question_tendency"],
+            "common_when_latest_content_naturally_invites_it",
+        )
+        self.assertEqual(value["reflective_explanation"], "rare_unless_explicitly_called_for")
+        self.assertEqual(value["generic_positive_opener"], "normally_omit")
+        self.assertEqual(value["typical_character_guide"], 250.0)
+        self.assertTrue(value["statistics_available"])
+
+    def test_behavior_calibration_marks_legacy_statistics_unavailable(self):
+        value = _behavior_calibration({})
+        self.assertFalse(value["statistics_available"])
+        self.assertEqual(value["question_tendency"], "unknown")
 
     def test_profile_activation_whitelist_is_explicit_when_empty(self):
         domain = {

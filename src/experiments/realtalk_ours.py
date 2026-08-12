@@ -89,7 +89,10 @@ SELF_DOMAIN_SYSTEM_PROMPT = """Compile a private Self Domain for a persona-simul
 Model the target speaker as a person: identity context, communication signature, interaction policy,
 and affective-social signature. Use the complete conversation to understand context, while grounding
 claims about the target in the target's own messages. Distinguish stable tendencies from one-off events
-and preserve uncertainty. Copy the supplied observable statistics exactly. Return only the schema."""
+and preserve uncertainty. Describe observed surface behavior rather than ideal social qualities: do not call
+the target supportive, reflective, validating, warm, or inquisitive unless repeated target messages directly
+show it. Qualitative descriptions must not override the deterministic rates. Copy the supplied observable
+statistics exactly. Return only the schema."""
 
 SELF_DOMAIN_USER_TEMPLATE = """TARGET SPEAKER: {speaker}
 SOURCE: the first {session_count} sessions of the target's paper-assigned Ca conversation.
@@ -135,8 +138,12 @@ the latest partner turn contains a concrete unanswered request, explicit invitat
 unfinished reference whose resolution is needed now. A detail that could merely be interesting to ask about is
 not an open thread. If the latest turn has no explicit question or request, default to no open thread. A direct
 question that the primary `answer` move already resolves does not by itself license a reciprocal question.
-Calibrate question decisions to the Self Domain's observed question rate as an upper tendency, not a quota;
-`follow-up` is appropriate only when asking is the chosen primary move, otherwise use `none`. Also use the
+Calibrate question decisions to the Self Domain's observed question rate as an upper tendency, not a quota.
+This calibration applies separately from reciprocal-question: when question_rate >= 0.65, a `follow-up`
+primary move is a common option when it directly develops the latest partner content; from 0.30 to 0.65 it
+is occasional; below 0.30 it is rare and requires a particularly salient unfinished partner point. A follow-up
+does not require emotional framing. `follow-up` is appropriate only when asking is the chosen primary move,
+otherwise use `none`. Also use the
 observed first-person rate and initiative to
 preserve the target's cadence of self-disclosure and topic movement: the latest partner turn is context, not
 an obligation to answer or reflect it. Do not optimize an ideal assistant response.
@@ -145,7 +152,9 @@ Do not infer an emotional or support need from ordinary enthusiasm, preferences,
 complaints. Set explicit_affect only when the partner explicitly expresses an affective state that matters to
 the next move. For ordinary conversation, avoid therapeutic validation, emotional interpretation, praise, and
 generic positive appraisal. Match the Self Domain's reflective_marker_rate and evaluative_opener_rate: they are
-observed behavioral ceilings, not targets to satisfy in every response.
+observed behavioral ceilings, not targets to satisfy in every response. If reflective_marker_rate < 0.10,
+do not request reflective motivation or meaning unless the visible history explicitly calls for it. If
+evaluative_opener_rate < 0.10, start directly with content rather than a generic positive evaluation.
 
 Interpret lambda_trace only as how far this action departs from the target's normal behavior to accommodate
 the partner. Reading the partner accurately is not adaptation. Relevant partner facts are not adaptation.
@@ -237,7 +246,9 @@ requested scale and in the Self Domain's
 communication signature. This behavioral view intentionally omits identity facts, interests, and old events;
 do not reconstruct or guess them. Do not add any other social move. Do not add a generic compliment,
 validation, emotional interpretation, or reflective explanation merely to sound warm or conversational.
-Match the observed reflective-marker and evaluative-opener rates instead of amplifying them."""
+The deterministic behavioral calibration is authoritative when qualitative descriptions conflict with it.
+Match its question, reflective-marker, evaluative-opener, and character-scale guidance instead of amplifying
+abstract persona adjectives."""
 
 FORMAT_REPAIR_TEMPLATE = """
 
@@ -980,7 +991,7 @@ def _write_generation_outputs(
     _write_json(output_dir / "dataset_manifest.json", dataset_manifest)
     _write_json(output_dir / "run_manifest.json", {
         "created_at_utc": _now(),
-        "protocol": "realtalk_task1_ours_agentic_v4_behavior_calibrated",
+        "protocol": "realtalk_task1_ours_agentic_v4_statistically_calibrated",
         "comparison_status": "protocol_aligned_not_runtime_identical",
         "paper_persona_simulation_model_disclosed": False,
         "implementation_repository_commit": _repository_commit(),
@@ -1177,11 +1188,56 @@ def _action_contract(primary_move: str, continuation_move: str = "none") -> str:
 
 
 def _behavioral_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:
+    stats = self_domain["observable_statistics"]
     return {
         "communication_signature": self_domain["communication_signature"],
         "interaction_policy_prior": self_domain["interaction_policy_prior"],
         "affective_social_signature": self_domain["affective_social_signature"],
-        "observable_statistics": self_domain["observable_statistics"],
+        "observable_statistics": stats,
+        "deterministic_behavior_calibration": _behavior_calibration(stats),
+    }
+
+
+def _behavior_calibration(stats: dict[str, Any]) -> dict[str, Any]:
+    required = {
+        "question_rate", "reflective_marker_rate", "evaluative_opener_rate",
+        "mean_characters", "median_characters",
+    }
+    if not required.issubset(stats):
+        return {
+            "statistics_available": False,
+            "question_tendency": "unknown",
+            "reflective_explanation": "unknown",
+            "generic_positive_opener": "unknown",
+            "short_character_guide": None,
+            "typical_character_guide": None,
+            "scale_is_guidance_not_hard_limit": True,
+        }
+    question_rate = float(stats["question_rate"])
+    reflective_rate = float(stats["reflective_marker_rate"])
+    opener_rate = float(stats["evaluative_opener_rate"])
+    median = float(stats["median_characters"])
+    mean = float(stats["mean_characters"])
+    return {
+        "statistics_available": True,
+        "question_tendency": (
+            "common_when_latest_content_naturally_invites_it"
+            if question_rate >= 0.65 else
+            "occasional_for_a_salient_unfinished_point"
+            if question_rate >= 0.30 else
+            "rare_without_a_direct_need"
+        ),
+        "reflective_explanation": (
+            "available_when_contextually_relevant"
+            if reflective_rate >= 0.20 else
+            "rare_unless_explicitly_called_for"
+        ),
+        "generic_positive_opener": (
+            "available_when_natural" if opener_rate >= 0.20 else "normally_omit"
+        ),
+        "short_character_guide": round(max(12.0, min(mean, median) * 0.6), 1),
+        "typical_character_guide": round(statistics.mean((mean, median)), 1),
+        "scale_is_guidance_not_hard_limit": True,
     }
 
 

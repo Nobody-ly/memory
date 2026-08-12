@@ -36,7 +36,7 @@ def _fact_schema() -> dict[str, Any]:
 
 
 SELF_DOMAIN_SCHEMA = {
-    "name": "realtalk_ours_agentic_self_domain_v3",
+    "name": "realtalk_ours_agentic_self_domain_v4",
     "strict": True,
     "schema": {
         "type": "object",
