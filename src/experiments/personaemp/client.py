@@ -90,6 +90,10 @@ class OpenAICompatibleChatBackend:
             "dashscope.aliyuncs.com" in base_url.lower()
             and model.lower().startswith("qwen")
         )
+        self.is_dashscope_deepseek = (
+            "dashscope.aliyuncs.com" in base_url.lower()
+            and model.lower().startswith("deepseek")
+        )
         self.token_usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -200,7 +204,9 @@ class OpenAICompatibleChatBackend:
                     }
                 else:
                     request["temperature"] = temperature
-                    if self.is_dashscope_qwen:
+                    if self.is_dashscope_qwen or getattr(
+                        self, "is_dashscope_deepseek", False
+                    ):
                         request["extra_body"] = {
                             "enable_thinking": thinking_enabled
                         }

@@ -286,6 +286,27 @@ class PersonaEmpPublicReproductionTests(unittest.TestCase):
         self.assertIn("exact schema", completions.request["messages"][-1]["content"])
         self.assertEqual(result.reasoning_content, "private reasoning")
 
+    def test_dashscope_deepseek_explicitly_disables_thinking(self) -> None:
+        completions = ThinkingJsonCompletions()
+        backend = OpenAICompatibleChatBackend.__new__(OpenAICompatibleChatBackend)
+        backend.model = "deepseek-v4-flash"
+        backend.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        backend.max_attempts = 1
+        backend.enable_thinking = False
+        backend.is_kimi_k2 = False
+        backend.is_dashscope_qwen = False
+        backend.is_dashscope_deepseek = True
+        backend.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+        result = backend.chat(
+            "system", "user", temperature=0.0, max_tokens=100,
+            enable_thinking=False,
+        )
+        self.assertEqual(result.content, '{"intents":["Personal Advice"]}')
+        assert completions.request is not None
+        self.assertEqual(
+            completions.request["extra_body"], {"enable_thinking": False}
+        )
+
     def test_alpsbench_adapter_joins_gold_and_reconstructs_intent(self) -> None:
         input_row = {
             "benchmark_id": "bench-1",
