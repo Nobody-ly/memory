@@ -315,14 +315,28 @@ class RealTalkOursTests(unittest.TestCase):
     def test_reciprocal_question_requires_supported_open_thread(self):
         decision = normalize_alignment(_decision())
         decision["next_action"]["continuation_move"] = "reciprocal-question"
-        with self.assertRaisesRegex(ValueError, "open partner thread"):
-            _validate_decision_context(decision, has_history=True)
+        normalized = _validate_decision_context(decision, has_history=True)
+        self.assertEqual(normalized["next_action"]["continuation_move"], "none")
         decision["situation"].update({
             "partner_has_open_thread": True,
             "missing_information": "the outcome of the partner's plan",
             "continuation_value": "high",
         })
+        decision["next_action"]["continuation_move"] = "reciprocal-question"
         self.assertIs(_validate_decision_context(decision, has_history=True), decision)
+
+    def test_closed_thread_derivatives_are_deterministically_normalized(self):
+        decision = normalize_alignment(_decision())
+        decision["situation"].update({
+            "partner_has_open_thread": False,
+            "missing_information": "stale detail",
+            "continuation_value": "high",
+        })
+        decision["next_action"]["continuation_move"] = "reciprocal-question"
+        normalized = _validate_decision_context(decision, has_history=True)
+        self.assertEqual(normalized["situation"]["missing_information"], "")
+        self.assertEqual(normalized["situation"]["continuation_value"], "none")
+        self.assertEqual(normalized["next_action"]["continuation_move"], "none")
 
     def test_public_table8_reconstruction_has_expected_519_merged_targets(self):
         config = RealTalkOursConfig(compute_local_metrics=False)

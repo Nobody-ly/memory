@@ -1411,6 +1411,10 @@ def _validate_decision_context(
     if not has_history and value["next_action"]["primary_move"] != "open":
         raise ValueError("empty history requires open primary_move")
     situation = value["situation"]
+    if not situation["partner_has_open_thread"]:
+        situation["missing_information"] = ""
+        situation["continuation_value"] = "none"
+        value["next_action"]["continuation_move"] = "none"
     continuation = value["next_action"]["continuation_move"]
     if continuation == "reciprocal-question":
         if not situation["partner_has_open_thread"]:
@@ -1419,11 +1423,6 @@ def _validate_decision_context(
             raise ValueError("reciprocal question requires named missing information")
         if situation["continuation_value"] != "high":
             raise ValueError("reciprocal question requires high continuation value")
-    if not situation["partner_has_open_thread"]:
-        if situation["missing_information"]:
-            raise ValueError("closed partner thread cannot declare missing information")
-        if situation["continuation_value"] != "none":
-            raise ValueError("closed partner thread requires continuation value none")
     return value
 
 
