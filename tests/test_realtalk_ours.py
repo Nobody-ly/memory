@@ -346,7 +346,7 @@ class RealTalkOursTests(unittest.TestCase):
             self.assertEqual(len(user_calls), 1)
             decision_calls = [c for c in backend.calls if c["schema"] == "realtalk_ours_agentic_decision_v4"]
             self.assertEqual(len(decision_calls), 21)
-            self.assertTrue(all(c["enable_thinking"] is False for c in decision_calls))
+            self.assertTrue(all(c["enable_thinking"] is True for c in decision_calls))
             generation_calls = [c for c in backend.calls if c["max_tokens"] == 300]
             self.assertEqual(len(generation_calls), 21)
             for call in generation_calls:

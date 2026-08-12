@@ -432,7 +432,7 @@ def run_realtalk_ours(
                     max_tokens=1600,
                     max_attempts=config.operation_max_attempts,
                     raw_audit=raw_audit,
-                    enable_thinking=False,
+                    enable_thinking=True,
                 )
                 decision = alignment_envelope["data"]
                 generation_envelope = _text_call(
@@ -991,7 +991,7 @@ def _write_generation_outputs(
     _write_json(output_dir / "dataset_manifest.json", dataset_manifest)
     _write_json(output_dir / "run_manifest.json", {
         "created_at_utc": _now(),
-        "protocol": "realtalk_task1_ours_agentic_v4_statistically_calibrated",
+        "protocol": "realtalk_task1_ours_agentic_v5_statistically_calibrated_thinking_decision",
         "comparison_status": "protocol_aligned_not_runtime_identical",
         "paper_persona_simulation_model_disclosed": False,
         "implementation_repository_commit": _repository_commit(),
