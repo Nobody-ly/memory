@@ -26,6 +26,8 @@ from src.experiments.realtalk_ours import (
     _prepare_dataset,
     _select_even_points_per_session,
     _structured_call,
+    _target_spoke_in_session,
+    _turns_with_session_boundaries,
     _validate_decision_profile_activation,
     run_realtalk_ours,
 )
@@ -136,7 +138,7 @@ class FakeBackend:
             decision = _decision()
             history = user_prompt.split(
                 "REAL CAUSAL HISTORY BEFORE THE TARGET MESSAGE:\n", 1
-            )[1].split("\n\nLATEST PARTNER MESSAGE", 1)[0]
+            )[1].split("\n\nCURRENT SESSION", 1)[0]
             if not history.strip():
                 decision["next_action"]["primary_move"] = "open"
             content = json.dumps(decision)
@@ -160,6 +162,19 @@ class FakeLabels:
 
 
 class RealTalkOursTests(unittest.TestCase):
+    def test_actor_history_preserves_session_boundaries_without_compression(self):
+        turns = [
+            {"session_id": "session_1", "speaker": "A", "content": "bye"},
+            {"session_id": "session_2", "speaker": "B", "content": "hello"},
+        ]
+        rendered = _turns_with_session_boundaries(turns)
+        self.assertEqual(
+            rendered,
+            "--- session_1 ---\nA: bye\n--- session_2 ---\nB: hello",
+        )
+        self.assertFalse(_target_spoke_in_session(turns, "A", "session_2"))
+        self.assertTrue(_target_spoke_in_session(turns, "A", "session_1"))
+
     def test_model_call_hard_timeout_interrupts_stalled_operation(self):
         if not hasattr(signal, "SIGALRM"):
             self.skipTest("POSIX hard-timeout signal is unavailable")

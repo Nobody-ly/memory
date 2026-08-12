@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .exp1_protocol import format_turns, protocol_turns, stable_hash
+from .exp1_protocol import protocol_turns, stable_hash
 from .operation_checkpoint import OperationCheckpoint
 from .realtalk_ours import (
     EXPECTED_MODEL,
@@ -16,7 +16,9 @@ from .realtalk_ours import (
     _action_contract,
     _backend_from_env,
     _behavioral_self_domain,
+    _target_spoke_in_session,
     _text_call,
+    _turns_with_session_boundaries,
 )
 
 
@@ -62,7 +64,11 @@ def run(source_dir: Path, dataset_dir: Path, output_dir: Path) -> dict:
                 operation_key=f"actor_replay:{row['result_id']}",
                 system_prompt=GENERATION_SYSTEM_TEMPLATE.format(speaker=row["speaker"]),
                 user_prompt=GENERATION_USER_TEMPLATE.format(
-                    history=format_turns(context),
+                    history=_turns_with_session_boundaries(context),
+                    current_session=row["target_session"],
+                    target_spoke_in_current_session=_target_spoke_in_session(
+                        context, row["speaker"], row["target_session"]
+                    ),
                     behavioral_self_domain=json.dumps(
                         _behavioral_self_domain(self_domains[row["speaker"]]),
                         ensure_ascii=False,

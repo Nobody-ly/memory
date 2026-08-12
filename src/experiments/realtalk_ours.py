@@ -210,6 +210,9 @@ CURRENT USER DOMAIN:
 REAL CAUSAL HISTORY BEFORE THE TARGET MESSAGE:
 {history}
 
+CURRENT SESSION: {current_session}
+TARGET SPEAKER HAS ALREADY SPOKEN IN THIS SESSION: {target_spoke_in_current_session}
+
 LATEST PARTNER MESSAGE (may be empty):
 {latest_partner_message}
 
@@ -229,6 +232,9 @@ Output only the message, not the speaker name."""
 
 GENERATION_USER_TEMPLATE = """REAL CONVERSATION HISTORY BEFORE YOUR NEXT MESSAGE:
 {history}
+
+CURRENT SESSION: {current_session}
+YOU HAVE ALREADY SPOKEN IN THIS SESSION: {target_spoke_in_current_session}
 
 PRIVATE BEHAVIORAL SELF DOMAIN:
 {behavioral_self_domain}
@@ -431,7 +437,11 @@ def run_realtalk_ours(
                         partner=speaker_data["partner"],
                         self_domain=_json(self_domain),
                         user_domain=_json(user_domain),
-                        history=_turns_with_ids(point["context_turns"]),
+                        history=_turns_with_session_boundaries(point["context_turns"]),
+                        current_session=point["target_session"],
+                        target_spoke_in_current_session=_target_spoke_in_session(
+                            point["context_turns"], speaker, point["target_session"]
+                        ),
                         latest_partner_message=latest_partner_message,
                         activation_whitelist=_profile_activation_whitelist(user_domain),
                     ),
@@ -456,7 +466,11 @@ def run_realtalk_ours(
                     system_prompt=GENERATION_SYSTEM_TEMPLATE.format(speaker=speaker),
                     user_prompt=GENERATION_USER_TEMPLATE.format(
                         speaker=speaker,
-                        history=format_turns(point["context_turns"]),
+                        history=_turns_with_session_boundaries(point["context_turns"]),
+                        current_session=point["target_session"],
+                        target_spoke_in_current_session=_target_spoke_in_session(
+                            point["context_turns"], speaker, point["target_session"]
+                        ),
                         behavioral_self_domain=_json(_behavioral_self_domain(self_domain)),
                         situation=_json(decision["situation"]),
                         next_action=_json(decision["next_action"]),
@@ -1570,6 +1584,28 @@ def _failure(
 def _turns_with_ids(turns: Iterable[dict[str, Any]]) -> str:
     return "\n".join(
         f"[{turn['turn_id']}] {turn['speaker']}: {turn['content']}" for turn in turns
+    )
+
+
+def _turns_with_session_boundaries(turns: Iterable[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    previous_session = ""
+    for turn in turns:
+        session_id = str(turn["session_id"])
+        if session_id != previous_session:
+            lines.append(f"--- {session_id} ---")
+            previous_session = session_id
+        lines.append(f"{turn['speaker']}: {turn['content']}")
+    return "\n".join(lines)
+
+
+def _target_spoke_in_session(
+    turns: Iterable[dict[str, Any]], speaker: str, session_id: str
+) -> bool:
+    return any(
+        turn["session_id"] == session_id
+        and turn["speaker"].casefold() == speaker.casefold()
+        for turn in turns
     )
 
 
