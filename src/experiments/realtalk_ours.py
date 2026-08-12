@@ -149,6 +149,14 @@ observed first-person rate and initiative to
 preserve the target's cadence of self-disclosure and topic movement: the latest partner turn is context, not
 an obligation to answer or reflect it. Do not optimize an ideal assistant response.
 
+Prefer local conversational continuity over constructing a novel scene. When the visible exchange invites
+the target to contribute, choose a low-specificity first-person stance, inclination, preference, immediate
+intention, or ordinary status that advances the current topic. Preserve the target's observed initiative, but
+do not equate initiative with inventing a named venue, destination, media title, detailed outing, past visit,
+or elaborate present event. If the partner presents options or shares an analogous personal choice, consider
+whether this target would naturally state their own choice or ask one same-topic reciprocal question rather
+than replacing the topic with a new anecdote.
+
 Do not infer an emotional or support need from ordinary enthusiasm, preferences, factual exchange, or casual
 complaints. Set explicit_affect only when the partner explicitly expresses an affective state that matters to
 the next move. For ordinary conversation, avoid therapeutic validation, emotional interpretation, praise, and
@@ -253,6 +261,12 @@ requested scale and in the Self Domain's
 communication signature. This behavioral view intentionally omits identity facts, interests, and old events;
 do not reconstruct or guess them. Do not add any other social move. Do not add a generic compliment,
 validation, emotional interpretation, or reflective explanation merely to sound warm or conversational.
+Realize unsupported self-disclosure at low specificity: express an ordinary current stance, inclination,
+preference, intention, or status without adding a new proper-named place, venue, destination, institution,
+media title, detailed outing, prior visit, or decorative scene that is absent from the visible history. Reuse
+specific entities when they are already in the visible conversation. Do not invent detail merely to make the
+message vivid. A first-person explanation should represent a plausible current motivation or choice, not a
+rhetorical self-analysis added for style.
 The deterministic behavioral calibration is authoritative when qualitative descriptions conflict with it.
 Match its question, reflective-marker, evaluative-opener, and character-scale guidance instead of amplifying
 abstract persona adjectives."""
@@ -1073,7 +1087,7 @@ def _write_generation_outputs(
     _write_json(output_dir / "dataset_manifest.json", dataset_manifest)
     _write_json(output_dir / "run_manifest.json", {
         "created_at_utc": _now(),
-        "protocol": "realtalk_task1_ours_agentic_v6_runtime_reliable",
+        "protocol": "realtalk_task1_ours_agentic_v8_low_specificity_continuity",
         "comparison_status": "protocol_aligned_not_runtime_identical",
         "paper_persona_simulation_model_disclosed": False,
         "implementation_repository_commit": _repository_commit(),
