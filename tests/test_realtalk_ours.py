@@ -15,6 +15,7 @@ from src.experiments.realtalk_ours import (
     EXPECTED_FULL_TARGETS,
     EXPECTED_MODEL,
     EXPECTED_SPEAKER_TARGETS,
+    DOMAIN_MAX_TOKENS,
     ModelCallHardTimeout,
     RealTalkOursConfig,
     _action_contract,
@@ -162,6 +163,9 @@ class FakeLabels:
 
 
 class RealTalkOursTests(unittest.TestCase):
+    def test_domain_token_budget_can_close_full_three_session_schema(self):
+        self.assertGreaterEqual(DOMAIN_MAX_TOKENS, 3000)
+
     def test_actor_history_preserves_session_boundaries_without_compression(self):
         turns = [
             {"session_id": "session_1", "speaker": "A", "content": "bye"},

@@ -50,6 +50,7 @@ from ..metrics import compute_rouge_l
 
 EXPECTED_MODEL = "qwen3-max-2026-01-23"
 ALLOWED_MODELS = frozenset({EXPECTED_MODEL, "deepseek-v4-flash", "deepseek-v4-pro"})
+DOMAIN_MAX_TOKENS = 3000
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_FULL_TARGETS = 519
 EXPECTED_SPEAKER_TARGETS = {
@@ -386,7 +387,7 @@ def run_realtalk_ours(
                 normalizer=lambda value: _validate_observable_statistics(
                     normalize_self_domain(value), observable_statistics
                 ),
-                max_tokens=1800,
+                max_tokens=DOMAIN_MAX_TOKENS,
                 max_attempts=config.operation_max_attempts,
                 raw_audit=raw_audit,
                 enable_thinking=False,
@@ -433,7 +434,7 @@ def run_realtalk_ours(
                             normalize_user_domain(value),
                             allowed_after_update,
                         ),
-                        max_tokens=1800,
+                        max_tokens=DOMAIN_MAX_TOKENS,
                         max_attempts=config.operation_max_attempts,
                         raw_audit=raw_audit,
                         enable_thinking=False,
@@ -1123,8 +1124,8 @@ def _write_generation_outputs(
         "response_length_restriction": None,
         "generated_output_rollout": False,
         "decoding": {
-            "self_domain": {"temperature": 0.2, "top_p": 0.9, "max_tokens": 1800},
-            "user_domain": {"temperature": 0.2, "top_p": 0.9, "max_tokens": 1800},
+            "self_domain": {"temperature": 0.2, "top_p": 0.9, "max_tokens": DOMAIN_MAX_TOKENS},
+            "user_domain": {"temperature": 0.2, "top_p": 0.9, "max_tokens": DOMAIN_MAX_TOKENS},
             "decision": {"temperature": 0.2, "top_p": 0.9, "max_tokens": 1600},
             "generation": {"temperature": 0.6, "top_p": 0.9, "max_tokens": 300},
             "seed": None,
