@@ -1373,8 +1373,22 @@ def _normalize_generated_message(value: str, speaker: str) -> str:
 def _validate_user_domain_evidence(
     value: dict[str, Any], allowed_turn_ids: set[str]
 ) -> dict[str, Any]:
+    suffix_index: dict[str, list[str]] = {}
+    for turn_id in allowed_turn_ids:
+        suffix_index.setdefault(turn_id.rsplit(":", 1)[-1], []).append(turn_id)
     for layer in ("core", "regulation", "cognition", "identity", "behavior"):
         for fact in value[layer]:
+            normalized: list[str] = []
+            for evidence_id in fact["evidence_ids"]:
+                if evidence_id in allowed_turn_ids:
+                    normalized.append(evidence_id)
+                    continue
+                matches = suffix_index.get(evidence_id, [])
+                if len(matches) == 1:
+                    normalized.append(matches[0])
+                else:
+                    normalized.append(evidence_id)
+            fact["evidence_ids"] = list(dict.fromkeys(normalized))
             evidence = set(fact["evidence_ids"])
             if not evidence:
                 raise ValueError(f"{layer} fact has no evidence turn IDs")

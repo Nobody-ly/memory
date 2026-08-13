@@ -16,6 +16,7 @@ from src.experiments.realtalk_ours import (
     EXPECTED_MODEL,
     EXPECTED_SPEAKER_TARGETS,
     DOMAIN_MAX_TOKENS,
+    empty_user_domain,
     ModelCallHardTimeout,
     RealTalkOursConfig,
     _action_contract,
@@ -24,6 +25,7 @@ from src.experiments.realtalk_ours import (
     _call_with_hard_timeout,
     _profile_activation_whitelist,
     _validate_decision_context,
+    _validate_user_domain_evidence,
     _prepare_dataset,
     _select_even_points_per_session,
     _structured_call,
@@ -165,6 +167,35 @@ class FakeLabels:
 class RealTalkOursTests(unittest.TestCase):
     def test_domain_token_budget_can_close_full_three_session_schema(self):
         self.assertGreaterEqual(DOMAIN_MAX_TOKENS, 3000)
+
+    def test_user_domain_normalizes_unique_short_evidence_id(self):
+        value = empty_user_domain()
+        value["core"] = [{
+            "value": "keeps in touch", "confidence": "high",
+            "evidence_ids": ["turn_3"],
+        }]
+        normalized = _validate_user_domain_evidence(value, {"session_1:turn_3"})
+        self.assertEqual(normalized["core"][0]["evidence_ids"], ["session_1:turn_3"])
+
+    def test_user_domain_rejects_ambiguous_short_evidence_id(self):
+        value = empty_user_domain()
+        value["core"] = [{
+            "value": "keeps in touch", "confidence": "high",
+            "evidence_ids": ["turn_3"],
+        }]
+        with self.assertRaisesRegex(ValueError, "unobserved or non-partner"):
+            _validate_user_domain_evidence(
+                value, {"session_1:turn_3", "session_2:turn_3"}
+            )
+
+    def test_user_domain_rejects_unknown_evidence_id(self):
+        value = empty_user_domain()
+        value["core"] = [{
+            "value": "keeps in touch", "confidence": "high",
+            "evidence_ids": ["turn_999"],
+        }]
+        with self.assertRaisesRegex(ValueError, "unobserved or non-partner"):
+            _validate_user_domain_evidence(value, {"session_1:turn_3"})
 
     def test_actor_history_preserves_session_boundaries_without_compression(self):
         turns = [
