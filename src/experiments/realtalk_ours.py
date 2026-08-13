@@ -49,7 +49,7 @@ from ..metrics import compute_rouge_l
 
 
 EXPECTED_MODEL = "qwen3-max-2026-01-23"
-ALLOWED_MODELS = frozenset({EXPECTED_MODEL, "deepseek-v4-flash"})
+ALLOWED_MODELS = frozenset({EXPECTED_MODEL, "deepseek-v4-flash", "deepseek-v4-pro"})
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_FULL_TARGETS = 519
 EXPECTED_SPEAKER_TARGETS = {
