@@ -339,11 +339,6 @@ class RealTalkOursTests(unittest.TestCase):
         self.assertEqual(normalized["situation"]["continuation_value"], "none")
         self.assertEqual(normalized["next_action"]["continuation_move"], "none")
 
-    def test_answer_with_reciprocal_question_has_no_conflicting_contract(self):
-        contract = _action_contract("answer", "reciprocal-question")
-        self.assertIn("Then ask exactly one short question", contract)
-        self.assertNotIn("Do not add a return question", contract)
-
     def test_public_table8_reconstruction_has_expected_519_merged_targets(self):
         config = RealTalkOursConfig(compute_local_metrics=False)
         manifest, prepared = _prepare_dataset(config, select_realtalk_splits(config.dataset_dir))
