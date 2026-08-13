@@ -139,7 +139,10 @@ Do not make every message acknowledge the partner and end with a question. `part
 the latest partner turn contains a concrete unanswered request, explicit invitation to elaborate, or genuinely
 unfinished reference whose resolution is needed now. A detail that could merely be interesting to ask about is
 not an open thread. If the latest turn has no explicit question or request, default to no open thread. A direct
-question that the primary `answer` move already resolves does not by itself license a reciprocal question.
+    question that the primary `answer` move resolves may still license one short symmetric return question when
+    this target commonly asks questions and the exchange clearly presents the same conversational slot to both
+    speakers (for example wellbeing, plans, preferences, or background). This is reciprocal turn-taking, not a
+    second topic or an invitation to interview the partner.
 Calibrate question decisions to the Self Domain's observed question rate as an upper tendency, not a quota.
 This calibration applies separately from reciprocal-question: when question_rate >= 0.65, a `follow-up`
 primary move is a common option when it directly develops the latest partner content; from 0.30 to 0.65 it
@@ -183,11 +186,11 @@ Primary moves are exclusive contracts:
 - follow-up: ask one relevant question; do not add a self-focused update or extended interpretation.
 - topic-shift: introduce one target-led topic; do not first summarize or validate the partner.
 
-After the primary move, `continuation_move` may be `reciprocal-question` only when all are true: the latest
-partner turn explicitly licenses continued inquiry, the primary move does not already resolve that interaction,
-missing_information names one necessary detail, continuation_value is high, and asking strongly fits this
-target's observed question behavior. It must be one short, directly related question. Otherwise use none. A
-follow-up primary move cannot also have a continuation move.
+After the primary move, `continuation_move` may be `reciprocal-question` only when asking strongly fits this
+target's observed question behavior and either (a) the latest partner turn explicitly licenses continued inquiry,
+or (b) an answer move naturally returns the same conversational slot to the partner. missing_information must
+name that one directly related detail and continuation_value must be high. Otherwise use none. A follow-up
+primary move cannot also have a continuation move.
 Keep the fields internally consistent:
 - no open thread -> missing_information="", continuation_value="none", continuation_move="none";
 - open thread with low value -> name the missing detail, but continuation_move="none";
@@ -270,7 +273,10 @@ message vivid. A first-person explanation should represent a plausible current m
 rhetorical self-analysis added for style.
 The deterministic behavioral calibration is authoritative when qualitative descriptions conflict with it.
 Match its question, reflective-marker, evaluative-opener, and character-scale guidance instead of amplifying
-abstract persona adjectives."""
+abstract persona adjectives. Treat the supplied character guide as a concrete drafting target: `short` should
+stay near short_character_guide, `typical` near typical_character_guide, and `extended` may exceed typical only
+when the visible exchange supports the extra content. Prefer a compact complete message over elaboration added
+for vividness, warmth, explanation, or polish."""
 
 FORMAT_REPAIR_TEMPLATE = """
 
@@ -1339,6 +1345,7 @@ def _behavior_calibration(stats: dict[str, Any]) -> dict[str, Any]:
         ),
         "short_character_guide": round(max(12.0, min(mean, median) * 0.6), 1),
         "typical_character_guide": round(statistics.mean((mean, median)), 1),
+        "extended_character_guide": round(max(mean, median) * 1.35, 1),
         "scale_is_guidance_not_hard_limit": True,
     }
 

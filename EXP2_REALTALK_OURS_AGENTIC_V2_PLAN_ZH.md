@@ -38,6 +38,8 @@
 
 Decision 必须选择一个而非 `mixed` 的 Primary Move。普通的相关回应、回答问题或理解上下文不自动提高 λ；日常事实和闲聊默认由 Self Domain 主导，仅在明确的情绪、关系或实际需要出现且目标人物会适应时进入 balanced/partner-adaptive。`question_mode` 仅允许明确的 `none` 或 `follow-up`，追问按 Self Domain 的观测问句率和问句习惯校准；同时使用观测第一人称率和主动性恢复自我披露、延续及转移话题的真实节奏，不能形成每条消息都确认对方并追问的固定模式。
 
+对于高问句倾向人物，`answer` 后允许一个同槽位的短对称回问（如双方的近况、计划或偏好），记录为唯一主动作后的 `reciprocal-question`，不视为第二策略。Actor 使用 Ca 的字符均值与中位数形成 short/typical/extended 的具体字符引导，避免把一个动作扩写成额外解释；该引导不是固定句数或硬截断。
+
 ### Response Actor
 
 Actor 只接收完整真实历史、完整 Self Domain、`situation` 和唯一 `next_action`，输出目标人物自然下一条消息。它不接收完整 User Domain、证据、λ 数值或依据、评价指标、Future State。

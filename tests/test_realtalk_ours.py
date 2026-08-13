@@ -287,6 +287,7 @@ class RealTalkOursTests(unittest.TestCase):
         self.assertEqual(value["reflective_explanation"], "rare_unless_explicitly_called_for")
         self.assertEqual(value["generic_positive_opener"], "normally_omit")
         self.assertEqual(value["typical_character_guide"], 250.0)
+        self.assertEqual(value["extended_character_guide"], 405.0)
         self.assertTrue(value["statistics_available"])
 
     def test_behavior_calibration_marks_legacy_statistics_unavailable(self):
