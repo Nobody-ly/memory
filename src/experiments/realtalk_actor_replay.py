@@ -10,7 +10,7 @@ from pathlib import Path
 from .exp1_protocol import protocol_turns, stable_hash
 from .operation_checkpoint import OperationCheckpoint
 from .realtalk_ours import (
-    EXPECTED_MODEL,
+    ALLOWED_MODELS,
     GENERATION_SYSTEM_TEMPLATE,
     GENERATION_USER_TEMPLATE,
     _action_contract,
@@ -29,14 +29,19 @@ def run(source_dir: Path, dataset_dir: Path, output_dir: Path) -> dict:
         if line.strip()
     ]
     self_domains = json.loads((source_dir / "self_domains.json").read_text(encoding="utf-8"))
-    backend = _backend_from_env()
-    if backend.model != EXPECTED_MODEL:
-        raise ValueError(f"actor replay requires {EXPECTED_MODEL}, got {backend.model}")
+    source_manifest = json.loads((source_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    source_model = source_manifest["ours_model"]
+    if source_model not in ALLOWED_MODELS:
+        raise ValueError(f"actor replay source model is not allowed: {source_model}")
+    backend = _backend_from_env(source_model)
+    if backend.model != source_model:
+        raise ValueError(f"actor replay requires {source_model}, got {backend.model}")
     output_dir.mkdir(parents=True, exist_ok=True)
     signature = stable_hash({
         "protocol": "realtalk_actor_continuation_replay_v1",
         "source_predictions_sha256": _sha256(source_dir / "predictions.jsonl"),
         "self_domains_sha256": _sha256(source_dir / "self_domains.json"),
+        "source_manifest_sha256": _sha256(source_dir / "run_manifest.json"),
         "generation_system": stable_hash(GENERATION_SYSTEM_TEMPLATE),
         "generation_user": stable_hash(GENERATION_USER_TEMPLATE),
         "model": backend.model,
@@ -98,6 +103,8 @@ def run(source_dir: Path, dataset_dir: Path, output_dir: Path) -> dict:
         "protocol": "realtalk_actor_continuation_replay_v1",
         "source_dir": str(source_dir.resolve()),
         "source_predictions_sha256": _sha256(source_dir / "predictions.jsonl"),
+        "source_manifest_sha256": _sha256(source_dir / "run_manifest.json"),
+        "model": source_model,
         "output_predictions_sha256": _sha256(output_dir / "predictions.jsonl"),
         "records": len(output_rows),
         "replayed_records": replayed,

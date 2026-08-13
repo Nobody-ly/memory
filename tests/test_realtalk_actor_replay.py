@@ -64,6 +64,9 @@ class RealTalkActorReplayTests(unittest.TestCase):
                 }}),
                 encoding="utf-8",
             )
+            (source / "run_manifest.json").write_text(
+                json.dumps({"ours_model": EXPECTED_MODEL}), encoding="utf-8"
+            )
             with patch(
                 "src.experiments.realtalk_actor_replay._backend_from_env",
                 return_value=FakeBackend(),
