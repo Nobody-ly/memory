@@ -1286,6 +1286,11 @@ def _action_contract(primary_move: str, continuation_move: str = "none") -> str:
     if continuation_move == "none":
         return primary_contract + " Do not add a follow-up question."
     if continuation_move == "reciprocal-question":
+        if primary_move == "answer":
+            primary_contract = (
+                "Answer the latest question directly and compactly. Do not add partner "
+                "interpretation or unrelated self-disclosure."
+            )
         return (
             primary_contract
             + " Keep the primary part to one short, direct sentence. Do not add praise, generic "
