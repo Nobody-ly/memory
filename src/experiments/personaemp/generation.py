@@ -21,6 +21,70 @@ from .dataset import PersonaEmpSample
 
 PERSONAEMP_RESPONSE_SYSTEM_PROMPT = ""
 
+AUTHOR_PROCESSED_PROTOCOL_VERSION = "personaemp_author_processed_adapter_v1"
+AUTHOR_PROCESSED_OMEGA = 0.0
+AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT = """You extract a sparse five-layer user profile from supplied long-term memory evidence.
+
+The five layers are:
+- core: stable fears, desires, values, attachment tendencies, and sources of meaning
+- regulation: recurring coping and emotion-regulation patterns
+- cognition: expression, information, decision, and communication preferences
+- identity: occupation, relationships, background, and durable life context
+- behavior: stable preferences, habits, and recurring behavior patterns
+
+Use only the supplied memory values. Do not treat a one-off event as a stable trait unless the memory itself states a durable pattern. Omit unsupported attributes; an empty layer is valid. Return only valid JSON. Each layer must be a JSON object, never an array. Use a concise snake_case attribute name for every supported leaf. Every included leaf must have this form:
+{{"value": "...", "confidence": 0.0, "evidence": "memory value supporting the attribute"}}
+
+Example shape:
+{{"core": {{"belonging_need": {{"value": "...", "confidence": 0.8, "evidence": "..."}}}}, "regulation": {{}}, "cognition": {{}}, "identity": {{}}, "behavior": {{}}}}
+"""
+AUTHOR_PROFILE_EXTRACTION_USER_PROMPT = """Extract the five-layer profile for the user from these long-term memory values:
+
+{corpus}
+"""
+AUTHOR_ALIGNMENT_SYSTEM_PROMPT = """You are the private alignment module of a personalized companion agent for a single-turn empathy benchmark.
+
+Use the fixed Agent Persona as the Self Domain and the five-layer profile as the User Domain. Infer the current user state only from the current query and supported memory/profile evidence. Unsupported layers must be marked as insufficient evidence rather than guessed.
+
+Prediction is current-turn risk planning: identify how a response could feel dismissive, intrusive, overly certain, or otherwise misaligned. Do not claim a longitudinal prediction or an observed future reaction.
+
+This benchmark provides no follow-up interaction. Epistemic omega is fixed at 0.0: exploit the available understanding, do not ask questions for the purpose of collecting profile information, and do not fabricate an Updating result. A natural question is allowed only when it directly serves the current request.
+
+Produce one response strategy that balances the stable Agent Persona with the user's immediate emotional and practical need. The response must directly address the current query; personalization is used only when relevant. Return only valid JSON matching the requested schema."""
+AUTHOR_ALIGNMENT_USER_PROMPT = """LONG-TERM MEMORY VALUES:
+{memory}
+
+CURRENT USER QUERY:
+{query}
+
+FIVE-LAYER USER DOMAIN (value/confidence only):
+{profile}
+
+FIXED AGENT PERSONA / SELF-DOMAIN SOURCE:
+{agent_persona}
+
+EPISTEMIC OMEGA: 0.0 (exploit-only; no profile-information gathering)
+
+Return the required Understanding, Prediction, Exploration, Alignment, and Empathy State JSON. Set exploration.decision to "exploit", exploration.omega_value to 0.0, and exploration.exploration_focus to null. No Updating field is available in this single-turn task."""
+AUTHOR_RESPONSE_SYSTEM_PROMPT = """You are the personalized companion represented by the private Self Domain. Produce the assistant response for the current PersonaEmp task. Follow the private alignment decision naturally and address the user's immediate need. Respond in the language of the user's query. Output only the response text."""
+AUTHOR_RESPONSE_USER_PROMPT = """You are a helpful, warm, and empathetic AI assistant.
+You will be provided with extracted memories from previous dialogue and private Deep Empathy reasoning derived only from those memories and the current query. Generate a personalized empathetic response to the user.
+---
+
+Memory extracted from previous conversation:
+{memory}
+
+Derived five-layer User Domain:
+{profile}
+
+Private single-turn alignment decision:
+{alignment}
+
+User Query:
+{query}
+
+Output only the assistant response. Do not mention memories, profiles, internal reasoning, criteria, or this instruction."""
+
 # PersonaEmp exposes user memory but no agent-side interaction history. Agent
 # persona and Self Domain are therefore disabled only in this benchmark
 # adapter; the production Deep Empathy prompt remains unchanged.
@@ -317,6 +381,23 @@ def _validate_profile(profile: dict[str, Any]) -> None:
         raise ValueError(f"profile layers must be objects: {', '.join(invalid)}")
 
 
+def _normalize_profile_layer_lists(profile: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a provider's array-shaped leaves without changing their content."""
+
+    normalized = dict(profile)
+    for layer in PROFILE_LAYERS:
+        value = normalized.get(layer)
+        if not isinstance(value, list):
+            continue
+        fields: dict[str, Any] = {}
+        for index, item in enumerate(value, 1):
+            if not isinstance(item, dict):
+                raise ValueError(f"profile.{layer}[{index - 1}] must be an object")
+            fields[f"attribute_{index}"] = item
+        normalized[layer] = fields
+    return normalized
+
+
 @dataclass(frozen=True)
 class StageUsage:
     model: str
@@ -474,21 +555,28 @@ class ProfileBuilder:
         backend: ChatBackend,
         cache: ProfileCache,
         schema_attempts: int = 3,
+        system_prompt: str = PROFILE_EXTRACTION_SYSTEM_PROMPT,
+        user_prompt_template: str = PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE,
+        normalize_layer_lists: bool = False,
     ) -> None:
         self.backend = backend
         self.cache = cache
         self.schema_attempts = schema_attempts
+        self.system_prompt = system_prompt
+        self.user_prompt_template = user_prompt_template
+        self.normalize_layer_lists = normalize_layer_lists
 
     def cache_key(self, sample: PersonaEmpSample) -> str:
         payload = {
             "session_id": sample.session_id,
             "memory": sample.memory_items,
             "model": self.backend.model,
-            "system_prompt_hash": prompt_hash(PROFILE_EXTRACTION_SYSTEM_PROMPT),
-            "user_prompt_hash": prompt_hash(PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE),
+            "system_prompt_hash": prompt_hash(self.system_prompt),
+            "user_prompt_hash": prompt_hash(self.user_prompt_template),
             "response_schema": PROFILE_RESPONSE_SCHEMA,
             "max_tokens": PROFILE_MAX_TOKENS,
             "parser_version": STRUCTURED_JSON_PARSER_VERSION,
+            "normalize_layer_lists": self.normalize_layer_lists,
         }
         return hashlib.sha256(
             json.dumps(
@@ -508,7 +596,7 @@ class ProfileBuilder:
             profile, _generation_usage = cached
             return profile, None
 
-        user_prompt = PROFILE_EXTRACTION_USER_PROMPT_TEMPLATE.format(
+        user_prompt = self.user_prompt_template.format(
             user_name="the user",
             corpus=_profile_corpus(sample),
         )
@@ -516,7 +604,7 @@ class ProfileBuilder:
         logical_results: list[ChatResult] = []
         for _ in range(self.schema_attempts):
             result = self.backend.chat(
-                PROFILE_EXTRACTION_SYSTEM_PROMPT.format(user_name="the user"),
+                self.system_prompt.format(user_name="the user"),
                 user_prompt,
                 temperature=0.2,
                 max_tokens=PROFILE_MAX_TOKENS,
@@ -525,6 +613,8 @@ class ProfileBuilder:
             logical_results.append(result)
             try:
                 profile = _parse_json_object(result.content)
+                if self.normalize_layer_lists:
+                    profile = _normalize_profile_layer_lists(profile)
                 _validate_profile(profile)
                 usage = StageUsage.combine(logical_results)
                 self.cache.save(cache_key, profile, usage)
@@ -928,5 +1018,129 @@ class DeepEmpathyGenerator:
                 "alignment": alignment.get("alignment", {}),
                 "empathy_state": alignment.get("empathy_state", {}),
                 "benchmark_adapter": alignment.get("adapter", {}),
+            },
+        )
+
+
+class AuthorProcessedDeepEmpathyGenerator(DeepEmpathyGenerator):
+    """Ours adapter for the authors' fixed PersonaEmp Task 1 splits."""
+
+    def __init__(
+        self,
+        backend: ChatBackend,
+        profile_builder: ProfileBuilder,
+        agent_persona: dict[str, Any],
+        schema_attempts: int = 3,
+    ) -> None:
+        super().__init__(backend, profile_builder, schema_attempts)
+        if not agent_persona:
+            raise ValueError("fixed agent persona must not be empty")
+        self.agent_persona = agent_persona
+
+    def _alignment(
+        self,
+        sample: PersonaEmpSample,
+        profile: dict[str, Any],
+        omega: float,
+    ) -> tuple[dict[str, Any], StageUsage]:
+        if omega != AUTHOR_PROCESSED_OMEGA:
+            raise ValueError("author-processed adapter requires omega=0.0")
+        user_prompt = AUTHOR_ALIGNMENT_USER_PROMPT.format(
+            memory=_memory_block(sample),
+            query=sample.query,
+            profile=json.dumps(_profile_prompt_view(profile), ensure_ascii=False),
+            agent_persona=json.dumps(
+                self.agent_persona,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        last_error: Exception | None = None
+        logical_results: list[ChatResult] = []
+        for _ in range(self.schema_attempts):
+            result = self.backend.chat(
+                AUTHOR_ALIGNMENT_SYSTEM_PROMPT,
+                user_prompt,
+                temperature=0.2,
+                max_tokens=ALIGNMENT_MAX_TOKENS,
+                response_schema=ALIGNMENT_RESPONSE_SCHEMA,
+            )
+            logical_results.append(result)
+            try:
+                alignment = _parse_json_object(result.content)
+                for field in (
+                    "understanding",
+                    "prediction",
+                    "exploration",
+                    "alignment",
+                    "empathy_state",
+                ):
+                    if not isinstance(alignment.get(field), dict):
+                        raise ValueError(f"alignment.{field} must be an object")
+                alignment["exploration"] = {
+                    "omega_value": AUTHOR_PROCESSED_OMEGA,
+                    "decision": "exploit",
+                    "rationale": (
+                        "Single-turn benchmark: use available evidence without "
+                        "profile-information gathering."
+                    ),
+                    "exploration_focus": None,
+                }
+                alignment["adapter"] = {
+                    "mode": "fixed_self_and_user_domain_single_turn",
+                    "agent_persona_used": True,
+                    "current_state_inherited": False,
+                    "updating_available": False,
+                }
+                return alignment, StageUsage.combine(logical_results)
+            except (ValueError, json.JSONDecodeError) as exc:
+                last_error = exc
+        raise RuntimeError(
+            "empathy alignment failed schema validation after "
+            f"{self.schema_attempts} logical attempts: {last_error}"
+        )
+
+    def generate(self, sample: PersonaEmpSample) -> GenerationOutput:
+        profile, profile_usage = self.profile_builder.build(sample)
+        omega = AUTHOR_PROCESSED_OMEGA
+        alignment, alignment_usage = self._alignment(sample, profile, omega)
+        response_result = self.backend.chat(
+            AUTHOR_RESPONSE_SYSTEM_PROMPT,
+            AUTHOR_RESPONSE_USER_PROMPT.format(
+                memory=_memory_block(sample),
+                profile=_profile_text(profile),
+                alignment=json.dumps(alignment, ensure_ascii=False),
+                query=sample.query,
+            ),
+            temperature=RESPONSE_TEMPERATURE,
+            max_tokens=RESPONSE_MAX_TOKENS,
+        )
+        stages = {
+            "alignment": alignment_usage,
+            "response": StageUsage.from_result(response_result),
+        }
+        if profile_usage is not None:
+            stages["profile"] = profile_usage
+        profile_hash = hashlib.sha256(
+            json.dumps(profile, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        alignment_hash = hashlib.sha256(
+            json.dumps(alignment, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return GenerationOutput(
+            response=_strip_reasoning(response_result.content),
+            method=self.method,
+            profile_hash=profile_hash,
+            alignment_hash=alignment_hash,
+            omega=omega,
+            stages=stages,
+            qualitative_artifacts={
+                "five_layer_profile": flatten_static_profile(profile),
+                "understanding": alignment.get("understanding", {}),
+                "prediction": alignment.get("prediction", {}),
+                "exploration": alignment.get("exploration", {}),
+                "alignment": alignment.get("alignment", {}),
+                "empathy_state": alignment.get("empathy_state", {}),
+                "adapter": alignment.get("adapter", {}),
             },
         )

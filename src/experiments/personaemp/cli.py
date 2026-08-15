@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 from .client import OpenAICompatibleChatBackend
 from .dataset import PersonaEmpDataset
 from .generation import (
+    AUTHOR_PROCESSED_PROTOCOL_VERSION,
+    AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+    AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+    AuthorProcessedDeepEmpathyGenerator,
     BaseModelGenerator,
     DeepEmpathyGenerator,
     JsonCache,
@@ -33,6 +38,20 @@ def _parser() -> argparse.ArgumentParser:
         choices=("base_model", "memory", "rag", "ours"),
         default=("ours",),
     )
+    parser.add_argument(
+        "--author-processed-data",
+        action="store_true",
+        help=(
+            "Use the authors' fixed split format, which contains non-unique "
+            "display IDs, and enable the fixed-persona Ours adapter."
+        ),
+    )
+    parser.add_argument(
+        "--agent-persona",
+        type=Path,
+        default=Path("dataset/test_agent.json"),
+        help="Fixed repository Agent Persona used only by Ours alignment.",
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
         "--balanced-per-category",
@@ -45,6 +64,7 @@ def _parser() -> argparse.ArgumentParser:
         default="unknown",
         choices=(
             "official",
+            "author_processed",
             "regenerated",
             "public_reconstruction",
             "paper_case_pilot",
@@ -74,7 +94,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    dataset = PersonaEmpDataset.load(args.dataset)
+    dataset = PersonaEmpDataset.load(
+        args.dataset,
+        allow_duplicate_display_ids=args.author_processed_data,
+    )
     if args.validate_only:
         print(
             json.dumps(
@@ -92,13 +115,38 @@ def main() -> int:
 
     backend = OpenAICompatibleChatBackend.from_env(args.env_prefix)
     profile_cache = ProfileCache(args.output_dir / "cache" / "profiles")
-    profile_builder = ProfileBuilder(backend, profile_cache)
+    if args.author_processed_data:
+        profile_builder = ProfileBuilder(
+            backend,
+            profile_cache,
+            system_prompt=AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+            user_prompt_template=AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+            normalize_layer_lists=True,
+        )
+        agent_persona_path = args.agent_persona.resolve()
+        agent_persona_bytes = agent_persona_path.read_bytes()
+        agent_persona = json.loads(agent_persona_bytes.decode("utf-8"))
+        if not isinstance(agent_persona, dict) or not agent_persona:
+            raise ValueError("--agent-persona must contain a non-empty JSON object")
+        ours_generator = AuthorProcessedDeepEmpathyGenerator(
+            backend,
+            profile_builder,
+            agent_persona,
+        )
+        protocol_version = AUTHOR_PROCESSED_PROTOCOL_VERSION
+        agent_persona_sha256 = hashlib.sha256(agent_persona_bytes).hexdigest()
+    else:
+        profile_builder = ProfileBuilder(backend, profile_cache)
+        ours_generator = DeepEmpathyGenerator(backend, profile_builder)
+        protocol_version = "personaemp_benchmark_adapter_v5"
+        agent_persona_path = None
+        agent_persona_sha256 = None
     summary_builder = MemorySummaryBuilder(
         backend,
         JsonCache(args.output_dir / "cache" / "memory_summaries"),
     )
     generators = {
-        "ours": DeepEmpathyGenerator(backend, profile_builder),
+        "ours": ours_generator,
         "base_model": BaseModelGenerator(backend),
         "memory": MemoryGenerator(backend, summary_builder),
     }
@@ -126,6 +174,11 @@ def main() -> int:
             generator_base_url=backend.base_url,
             generator_enable_thinking=backend.enable_thinking,
             balanced_per_category=args.balanced_per_category,
+            protocol_version=protocol_version,
+            agent_persona_path=(
+                str(agent_persona_path) if agent_persona_path else None
+            ),
+            agent_persona_sha256=agent_persona_sha256,
         ),
         generators=selected_generators,
     )

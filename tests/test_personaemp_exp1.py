@@ -17,6 +17,12 @@ from src.experiments.personaemp.dataset import (
     PersonaEmpDatasetError,
 )
 from src.experiments.personaemp.generation import (
+    AUTHOR_ALIGNMENT_SYSTEM_PROMPT,
+    AUTHOR_PROCESSED_PROTOCOL_VERSION,
+    AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+    AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+    AUTHOR_RESPONSE_SYSTEM_PROMPT,
+    AuthorProcessedDeepEmpathyGenerator,
     PERSONAEMP_AGENT_PERSONA_DISABLED,
     RESPONSE_MAX_TOKENS,
     RESPONSE_TEMPERATURE,
@@ -27,6 +33,7 @@ from src.experiments.personaemp.generation import (
     ProfileBuilder,
     ProfileCache,
     StageUsage,
+    _normalize_profile_layer_lists,
     _parse_json_object,
 )
 from src.experiments.personaemp.runner import (
@@ -152,6 +159,71 @@ class FakeBackend:
         )
 
 
+class AuthorFakeBackend(FakeBackend):
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float,
+        max_tokens: int,
+        response_schema: dict[str, object] | None = None,
+    ) -> ChatResult:
+        self.calls.append(
+            {
+                "system": system_prompt,
+                "user": user_prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "response_schema": response_schema,
+            }
+        )
+        if "sparse five-layer user profile" in system_prompt:
+            content = json.dumps(
+                {
+                    "core": {
+                        "value": {
+                            "value": "values autonomy",
+                            "confidence": 0.9,
+                            "evidence": "private evidence marker",
+                        }
+                    },
+                    "regulation": {},
+                    "cognition": {},
+                    "identity": {},
+                    "behavior": {},
+                }
+            )
+        elif system_prompt == AUTHOR_ALIGNMENT_SYSTEM_PROMPT:
+            content = json.dumps(
+                {
+                    "understanding": {
+                        "self_domain": {"tone": "steady and warm"},
+                        "user_domain": {"current_emotion": "conflicted"},
+                    },
+                    "prediction": {
+                        "risk_of_misalignment": "advice may feel dismissive"
+                    },
+                    "exploration": {"decision": "explore"},
+                    "alignment": {"response_policy": "validate then answer"},
+                    "empathy_state": {
+                        "empathy_level": "high",
+                        "response_guidance": "direct and warm",
+                    },
+                }
+            )
+        else:
+            content = "A direct, personalized and empathetic response."
+        return ChatResult(
+            content=content,
+            model=self.model,
+            prompt_tokens=10,
+            completion_tokens=5,
+            latency_seconds=0.01,
+            attempts=1,
+        )
+
+
 class RecordingCompletions:
     def __init__(self) -> None:
         self.request: dict[str, object] | None = None
@@ -230,8 +302,49 @@ class PersonaEmpDatasetTests(unittest.TestCase):
             with self.assertRaises(PersonaEmpDatasetError):
                 PersonaEmpDataset.load(path)
 
+    def test_author_mode_preserves_nonunique_display_ids(self) -> None:
+        raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        duplicate = json.loads(json.dumps(raw[0]))
+        duplicate["queries"] = [duplicate["queries"][0]]
+        raw.append(duplicate)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "author.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            dataset = PersonaEmpDataset.load(
+                path,
+                allow_duplicate_display_ids=True,
+            )
+
+        self.assertEqual(len(dataset.raw_sessions), 2)
+        self.assertEqual(len(dataset.samples), 4)
+        self.assertEqual(dataset.samples[0].session_id, dataset.samples[3].session_id)
+        self.assertEqual(dataset.samples[0].query_id, dataset.samples[3].query_id)
+        self.assertNotEqual(
+            dataset.samples[0].internal_key,
+            dataset.samples[3].internal_key,
+        )
+
 
 class DeepEmpathyGenerationTests(unittest.TestCase):
+    def test_author_profile_list_shape_is_normalized_without_content_loss(self) -> None:
+        leaf = {
+            "value": "prefers direct support",
+            "confidence": 0.8,
+            "evidence": "memory-1",
+        }
+        profile = {
+            "core": [leaf],
+            "regulation": [],
+            "cognition": [],
+            "identity": [],
+            "behavior": [],
+        }
+
+        normalized = _normalize_profile_layer_lists(profile)
+
+        self.assertEqual(normalized["core"]["attribute_1"], leaf)
+        self.assertEqual(normalized["regulation"], {})
+
     def test_structured_parser_closes_only_unbalanced_eof_containers(self) -> None:
         parsed = _parse_json_object(
             '{"core":{},"regulation":{},"cognition":{},'
@@ -495,6 +608,128 @@ class DeepEmpathyGenerationTests(unittest.TestCase):
                 "profile_preprocessing_excluded"
             ]
         )
+
+    def test_author_adapter_uses_fixed_persona_and_hides_gold_fields(self) -> None:
+        dataset = PersonaEmpDataset.load(FIXTURE)
+        backend = AuthorFakeBackend()
+        fixed_persona = {
+            "identity": "fixed agent marker",
+            "principles": ["truthful", "warm"],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            builder = ProfileBuilder(
+                backend,
+                ProfileCache(Path(directory) / "profiles"),
+                system_prompt=AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+                user_prompt_template=AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+            )
+            output = AuthorProcessedDeepEmpathyGenerator(
+                backend,
+                builder,
+                fixed_persona,
+            ).generate(dataset.samples[0])
+
+        self.assertEqual(output.omega, 0.0)
+        self.assertEqual(
+            output.qualitative_artifacts["exploration"]["decision"],
+            "exploit",
+        )
+        self.assertIsNone(
+            output.qualitative_artifacts["exploration"]["exploration_focus"]
+        )
+        profile_call, alignment_call, response_call = backend.calls
+        self.assertIn("fixed agent marker", str(alignment_call["user"]))
+        self.assertNotIn("fixed agent marker", str(response_call["user"]))
+        self.assertNotIn("private evidence marker", str(alignment_call["user"]))
+        self.assertNotIn("private evidence marker", str(response_call["user"]))
+        self.assertEqual(response_call["system"], AUTHOR_RESPONSE_SYSTEM_PROMPT)
+        sample = dataset.samples[0]
+        for call in backend.calls:
+            combined = f"{call['system']}\n{call['user']}"
+            for forbidden in (
+                sample.persona_text,
+                sample.scenario,
+                sample.category,
+                sample.conversation[0]["text"],
+            ):
+                self.assertNotIn(forbidden, combined)
+
+    def test_author_runner_exports_duplicate_ids_by_occurrence(self) -> None:
+        raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        duplicate = json.loads(json.dumps(raw[0]))
+        duplicate["queries"] = [duplicate["queries"][0]]
+        raw = [raw[0], duplicate]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset_path = root / "author.json"
+            dataset_path.write_text(json.dumps(raw), encoding="utf-8")
+            dataset = PersonaEmpDataset.load(
+                dataset_path,
+                allow_duplicate_display_ids=True,
+            )
+            backend = AuthorFakeBackend()
+            output_dir = root / "run"
+            builder = ProfileBuilder(
+                backend,
+                ProfileCache(output_dir / "cache" / "profiles"),
+                system_prompt=AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+                user_prompt_template=AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+            )
+            runner = PersonaEmpRunner(
+                repository_root=ROOT,
+                dataset=dataset,
+                output_dir=output_dir,
+                config=RunConfiguration(
+                    methods=("ours",),
+                    limit=None,
+                    dataset_provenance="author_processed",
+                    expected_table1_dataset_sha256=dataset.fingerprint,
+                    generator_model=backend.model,
+                    generator_base_url="https://example.invalid/v1",
+                    generator_enable_thinking=False,
+                    protocol_version=AUTHOR_PROCESSED_PROTOCOL_VERSION,
+                    agent_persona_path="dataset/test_agent.json",
+                    agent_persona_sha256="persona-hash",
+                ),
+                generators={
+                    "ours": AuthorProcessedDeepEmpathyGenerator(
+                        backend,
+                        builder,
+                        {"identity": "fixed"},
+                    )
+                },
+            )
+            self.assertFalse(
+                runner._manifest(1)["dataset"][
+                    "table1_direct_comparison_allowed"
+                ]
+            )
+            summary = runner.run()
+            predictions = json.loads(
+                (output_dir / "predictions" / "ours.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            manifest = json.loads(
+                (output_dir / "run_manifest.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(summary["successful_results"], 4)
+        self.assertEqual(len(predictions), 2)
+        self.assertEqual(sum(len(x["responses"]) for x in predictions), 4)
+        self.assertEqual(
+            predictions[0]["responses"][0]["query_id"],
+            predictions[1]["responses"][0]["query_id"],
+        )
+        self.assertTrue(manifest["dataset"]["table1_direct_comparison_allowed"])
+        self.assertEqual(
+            manifest["generation"]["protocol_version"],
+            AUTHOR_PROCESSED_PROTOCOL_VERSION,
+        )
+        adapter = manifest["generation"]["personaemp_alignment_adapter"]
+        self.assertEqual(adapter["omega_mode"], "fixed_zero")
+        self.assertEqual(adapter["exploration_mode"], "exploit_only")
+        self.assertTrue(adapter["agent_persona_sha256"])
 
 
 class OfficialEvaluationAdapterTests(unittest.TestCase):

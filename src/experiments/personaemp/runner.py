@@ -11,6 +11,13 @@ from typing import Any, Iterable
 
 from .dataset import PersonaEmpDataset, PersonaEmpSample
 from .generation import (
+    AUTHOR_ALIGNMENT_SYSTEM_PROMPT,
+    AUTHOR_ALIGNMENT_USER_PROMPT,
+    AUTHOR_PROCESSED_PROTOCOL_VERSION,
+    AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT,
+    AUTHOR_PROFILE_EXTRACTION_USER_PROMPT,
+    AUTHOR_RESPONSE_SYSTEM_PROMPT,
+    AUTHOR_RESPONSE_USER_PROMPT,
     BASE_MODEL_USER_PROMPT,
     ALIGNMENT_RESPONSE_SCHEMA,
     ALIGNMENT_MAX_TOKENS,
@@ -76,13 +83,40 @@ def _sample_id(
     method: str,
 ) -> str:
     value = (
-        f"{dataset_fingerprint}\0{sample.session_id}\0"
-        f"{sample.query_id}\0{method}"
+        f"{dataset_fingerprint}\0{sample.session_index}\0{sample.query_index}\0"
+        f"{sample.session_id}\0{sample.query_id}\0{method}"
     )
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _generation_prompt_hashes() -> dict[str, str]:
+def _generation_prompt_hashes(protocol_version: str) -> dict[str, str]:
+    if protocol_version == AUTHOR_PROCESSED_PROTOCOL_VERSION:
+        return {
+            "profile_extraction_system": prompt_hash(
+                AUTHOR_PROFILE_EXTRACTION_SYSTEM_PROMPT
+            ),
+            "profile_extraction_user_template": prompt_hash(
+                AUTHOR_PROFILE_EXTRACTION_USER_PROMPT
+            ),
+            "empathy_alignment_system": prompt_hash(
+                AUTHOR_ALIGNMENT_SYSTEM_PROMPT
+            ),
+            "empathy_alignment_user_template": prompt_hash(
+                AUTHOR_ALIGNMENT_USER_PROMPT
+            ),
+            "response_system": prompt_hash(AUTHOR_RESPONSE_SYSTEM_PROMPT),
+            "response_user_template": prompt_hash(AUTHOR_RESPONSE_USER_PROMPT),
+            "profile_response_schema": prompt_hash(
+                json.dumps(PROFILE_RESPONSE_SCHEMA, sort_keys=True)
+            ),
+            "alignment_response_schema": prompt_hash(
+                json.dumps(ALIGNMENT_RESPONSE_SCHEMA, sort_keys=True)
+            ),
+            "structured_json_parser": prompt_hash(
+                STRUCTURED_JSON_PARSER_VERSION
+            ),
+            "profile_prompt_view": prompt_hash(PROFILE_PROMPT_VIEW_VERSION),
+        }
     return {
         "shared_response_system": prompt_hash(
             PERSONAEMP_RESPONSE_SYSTEM_PROMPT
@@ -184,27 +218,56 @@ def _selected_dataset(
 
 def _prediction_rows(
     selected_dataset: list[dict[str, Any]],
+    selected_samples: list[PersonaEmpSample],
     records: list[dict[str, Any]],
     method: str,
 ) -> list[dict[str, Any]]:
-    response_by_query = {
-        str(record["query_id"]): str(record["response"])
+    successful_records = [
+        record
         for record in records
         if record.get("status") == "success" and record.get("method") == method
+    ]
+    response_by_position = {
+        (int(record["session_index"]), int(record["query_index"])): str(
+            record["response"]
+        )
+        for record in successful_records
+        if "session_index" in record and "query_index" in record
     }
+    legacy_response_by_id = {
+        (str(record.get("session_id") or ""), str(record.get("query_id") or "")): str(
+            record["response"]
+        )
+        for record in successful_records
+        if "session_index" not in record or "query_index" not in record
+    }
+    ordered_samples = sorted(
+        selected_samples,
+        key=lambda sample: (sample.session_index, sample.query_index),
+    )
+    sample_cursor = 0
     output: list[dict[str, Any]] = []
     for session in selected_dataset:
         responses: list[dict[str, str]] = []
         for query in session.get("queries", []):
+            sample = ordered_samples[sample_cursor]
+            sample_cursor += 1
             query_id = str(query.get("query_id") or "")
-            if query_id not in response_by_query:
+            if query_id != sample.query_id:
+                raise RuntimeError("selected dataset/sample order is misaligned")
+            position = (sample.session_index, sample.query_index)
+            response = response_by_position.get(position)
+            if response is None:
+                response = legacy_response_by_id.get((sample.session_id, sample.query_id))
+            if response is None:
                 raise RuntimeError(
-                    f"cannot export {method}: missing successful response for {query_id}"
+                    f"cannot export {method}: missing successful response for "
+                    f"{sample.internal_key}"
                 )
             responses.append(
                 {
                     "query_id": query_id,
-                    "response": response_by_query[query_id],
+                    "response": response,
                 }
             )
         output.append(
@@ -215,6 +278,8 @@ def _prediction_rows(
                 "responses": responses,
             }
         )
+    if sample_cursor != len(ordered_samples):
+        raise RuntimeError("not all selected samples were exported")
     return output
 
 
@@ -325,6 +390,9 @@ class RunConfiguration:
     generator_base_url: str
     generator_enable_thinking: bool
     balanced_per_category: int | None = None
+    protocol_version: str = "personaemp_benchmark_adapter_v5"
+    agent_persona_path: str | None = None
+    agent_persona_sha256: str | None = None
 
     def identity(
         self,
@@ -341,6 +409,9 @@ class RunConfiguration:
             "generator_base_url": self.generator_base_url,
             "generator_enable_thinking": self.generator_enable_thinking,
             "balanced_per_category": self.balanced_per_category,
+            "protocol_version": self.protocol_version,
+            "agent_persona_path": self.agent_persona_path,
+            "agent_persona_sha256": self.agent_persona_sha256,
             "prompt_hashes": prompt_hashes,
         }
         return hashlib.sha256(
@@ -380,8 +451,14 @@ class PersonaEmpRunner:
         expected_hash = self.config.expected_table1_dataset_sha256
         table1_compatible = bool(
             expected_hash and expected_hash == self.dataset.fingerprint
+            and selected_count == len(self.dataset.samples)
         )
-        generation_prompt_hashes = _generation_prompt_hashes()
+        generation_prompt_hashes = _generation_prompt_hashes(
+            self.config.protocol_version
+        )
+        author_processed = (
+            self.config.protocol_version == AUTHOR_PROCESSED_PROTOCOL_VERSION
+        )
         return {
             "experiment": "exp1_personaemp_deep_empathy",
             "created_at": _utc_now(),
@@ -415,7 +492,7 @@ class PersonaEmpRunner:
                 "paper": "arXiv:2606.00728v1",
             },
             "generation": {
-                "protocol_version": "personaemp_benchmark_adapter_v5",
+                "protocol_version": self.config.protocol_version,
                 "model": self.config.generator_model,
                 "base_url": self.config.generator_base_url,
                 "enable_thinking": self.config.generator_enable_thinking,
@@ -451,26 +528,46 @@ class PersonaEmpRunner:
                     ),
                     "dataset_persona_visible_to_generators": False,
                     "dataset_persona_visible_to_official_judges": True,
-                    "external_agent_persona_visible_to_generators": False,
-                    "agent_persona_visible_to_ours_alignment": False,
+                    "external_agent_persona_visible_to_generators": author_processed,
+                    "agent_persona_visible_to_ours_alignment": author_processed,
+                    "agent_persona_visible_to_final_response": False,
                 },
                 "response_contract": {
-                    "shared_by_all_methods": True,
-                    "source": "official_train_prepare_dataset_prompt",
+                    "shared_by_all_methods": not author_processed,
+                    "source": (
+                        "official_task_contract_plus_ours_private_state"
+                        if author_processed
+                        else "official_train_prepare_dataset_prompt"
+                    ),
                     "style_restrictions_added": False,
                     "max_tokens": RESPONSE_MAX_TOKENS,
                     "temperature": RESPONSE_TEMPERATURE,
                 },
                 "personaemp_alignment_adapter": {
-                    "agent_persona_mode": "disabled",
+                    "agent_persona_mode": (
+                        "fixed_repository_default" if author_processed else "disabled"
+                    ),
+                    "agent_persona_path": self.config.agent_persona_path,
+                    "agent_persona_sha256": self.config.agent_persona_sha256,
                     "individual_agent_persona_generated": False,
-                    "self_domain_mode": "disabled_user_domain_only",
+                    "self_domain_mode": (
+                        "fixed_persona_alignment" if author_processed
+                        else "disabled_user_domain_only"
+                    ),
                     "current_state_inherited_across_queries": False,
                     "temporal_omega_decay_enabled": False,
-                    "omega_uses_profile_completeness": True,
-                    "omega_mode": "profile_completeness_only",
+                    "omega_uses_profile_completeness": not author_processed,
+                    "omega_mode": (
+                        "fixed_zero" if author_processed
+                        else "profile_completeness_only"
+                    ),
                     "interaction_count": PERSONAEMP_OMEGA_INTERACTION_COUNT,
-                    "exploration_output_forced": False,
+                    "exploration_output_forced": author_processed,
+                    "exploration_mode": (
+                        "exploit_only" if author_processed else "adaptive_output"
+                    ),
+                    "updating_available": False,
+                    "verification_or_rewrite_enabled": False,
                     "profile_generation_preserves_evidence": True,
                     "profile_prompt_view": PROFILE_PROMPT_VIEW_VERSION,
                 },
@@ -546,6 +643,8 @@ class PersonaEmpRunner:
                         "completed_at": _utc_now(),
                         "session_id": sample.session_id,
                         "query_id": sample.query_id,
+                        "session_index": sample.session_index,
+                        "query_index": sample.query_index,
                         "query_sha256": hashlib.sha256(
                             sample.query.encode("utf-8")
                         ).hexdigest(),
@@ -560,6 +659,8 @@ class PersonaEmpRunner:
                         "failed_at": _utc_now(),
                         "session_id": sample.session_id,
                         "query_id": sample.query_id,
+                        "session_index": sample.session_index,
+                        "query_index": sample.query_index,
                         "method": method,
                         "error_type": type(exc).__name__,
                         "error": str(exc),
@@ -574,7 +675,12 @@ class PersonaEmpRunner:
 
         prediction_paths: dict[str, str] = {}
         for method in self.config.methods:
-            predictions = _prediction_rows(selected_dataset, all_records, method)
+            predictions = _prediction_rows(
+                selected_dataset,
+                samples,
+                all_records,
+                method,
+            )
             prediction_path = self.output_dir / "predictions" / f"{method}.json"
             _atomic_json(prediction_path, predictions)
             prediction_paths[method] = str(prediction_path)

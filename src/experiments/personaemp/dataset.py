@@ -83,6 +83,15 @@ class PersonaEmpSample:
     query_index: int
 
     @property
+    def internal_key(self) -> str:
+        """Return the occurrence identity; public IDs are not globally unique."""
+
+        return (
+            f"{self.session_index}:{self.query_index}:"
+            f"{self.session_id}:{self.query_id}"
+        )
+
+    @property
     def sample_key(self) -> str:
         return f"{self.session_id}:{self.query_id}"
 
@@ -95,7 +104,12 @@ class PersonaEmpDataset:
     samples: tuple[PersonaEmpSample, ...]
 
     @classmethod
-    def load(cls, path: str | Path) -> "PersonaEmpDataset":
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        allow_duplicate_display_ids: bool = False,
+    ) -> "PersonaEmpDataset":
         dataset_path = Path(path).resolve()
         try:
             raw_bytes = dataset_path.read_bytes()
@@ -122,7 +136,7 @@ class PersonaEmpDataset:
                 session.get("session_id") or session.get("original_sid"),
                 f"session[{session_index}].session_id",
             )
-            if session_id in seen_session_ids:
+            if not allow_duplicate_display_ids and session_id in seen_session_ids:
                 raise PersonaEmpDatasetError(f"duplicate session_id: {session_id}")
             seen_session_ids.add(session_id)
 
@@ -179,7 +193,7 @@ class PersonaEmpDataset:
                     query_item.get("query_id"),
                     f"session[{session_index}].queries[{query_index}].query_id",
                 )
-                if query_id in seen_query_ids:
+                if not allow_duplicate_display_ids and query_id in seen_query_ids:
                     raise PersonaEmpDatasetError(f"duplicate query_id: {query_id}")
                 seen_query_ids.add(query_id)
 
