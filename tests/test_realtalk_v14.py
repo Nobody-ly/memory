@@ -15,14 +15,11 @@ from src.experiments.realtalk_v14 import (
     V14Config,
     _actor_plan_view,
     _information_question_count,
-    _v9_content_focus,
-    _validate_v14_context,
     alignment_consistency_audit,
     actor_structure_audit,
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
     classify_interaction_trigger,
-    decision_plan_audit,
     normalize_bubble_layout,
     retrieve_ca_behavior_examples,
     run_v14,
@@ -57,7 +54,8 @@ def _decision() -> dict:
             "reflection_depth": "surface",
             "relationship_register": "casual",
             "length_band": "typical",
-            "content_direction": "answer and return the same conversational slot",
+            "content_focus": "answer the current conversational slot",
+            "question_target": "the partner's answer to the same slot",
             "tone": "informal",
         },
     }
@@ -161,6 +159,7 @@ class FakeV14Backend:
                     "primary_move": "open",
                     "supporting_moves": [],
                     "question_plan": "none",
+                    "question_target": "",
                 })
             content = json.dumps(value)
         else:
@@ -269,10 +268,12 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertTrue(audit["non_blocking"])
         self.assertIn("partner_trigger_low_lambda", audit["warnings"])
 
-    def test_actor_plan_has_one_question_control_and_no_free_direction(self):
+    def test_actor_plan_has_one_question_control_and_structured_content(self):
         view = _actor_plan_view(_decision()["message_plan"])
         self.assertEqual(view["question_plan"], "reciprocal")
         self.assertNotIn("content_direction", view)
+        self.assertIn("content_focus", view)
+        self.assertIn("question_target", view)
         self.assertNotIn("reciprocal-question", view["supporting_moves"])
 
     def test_structured_question_plan_remains_authoritative_over_free_text(self):
@@ -280,15 +281,11 @@ class RealTalkV14Tests(unittest.TestCase):
         invalid["message_plan"].update({
             "supporting_moves": ["acknowledge"],
             "question_plan": "none",
-            "content_direction": "Acknowledge the point and end with a question.",
+            "content_focus": "Acknowledge the point and end with a question.",
+            "question_target": "",
         })
-        normalized = _validate_v14_context(
-            normalize_v14_decision(invalid),
-            has_history=True,
-        )
-        audit = decision_plan_audit(normalized["message_plan"])
-        self.assertTrue(audit["direction_question_conflict"])
-        self.assertTrue(audit["question_plan_is_authoritative"])
+        with self.assertRaisesRegex(ValueError, "question instruction"):
+            normalize_v14_decision(invalid)
 
     def test_actor_prompt_has_no_metrics_lambda_or_full_user_domain(self):
         lower = ACTOR_USER_TEMPLATE.casefold()
@@ -317,13 +314,22 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertEqual(normalized, original)
         self.assertFalse(audit["applied"])
 
-    def test_v9_content_focus_exposes_no_action_or_generated_text(self):
-        focus = _v9_content_focus({
-            "primary_move": "answer",
-            "content_direction": "weekend plan",
-            "generated_message": "must stay private",
+    def test_question_target_must_match_question_permission(self):
+        invalid = _decision()
+        invalid["message_plan"].update({
+            "question_plan": "none",
+            "question_target": "weekend plans",
         })
-        self.assertEqual(focus, {"content_direction": "weekend plan"})
+        with self.assertRaisesRegex(ValueError, "question_target must be empty"):
+            normalize_v14_decision(invalid)
+
+        invalid = _decision()
+        invalid["message_plan"].update({
+            "question_plan": "follow-up",
+            "question_target": "",
+        })
+        with self.assertRaisesRegex(ValueError, "question_target is required"):
+            normalize_v14_decision(invalid)
 
     def test_question_audit_ignores_rhetorical_tag_and_rejects_two_questions(self):
         self.assertEqual(_information_question_count("That's fair, you know?"), 0)

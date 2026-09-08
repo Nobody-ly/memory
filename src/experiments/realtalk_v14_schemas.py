@@ -1,6 +1,7 @@
 """Strict decision contract for the REALTALK V14 turn-bundle replay."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .realtalk_ours_schemas import PROFILE_LAYERS
@@ -136,7 +137,8 @@ DECISION_SCHEMA = {
                         "type": "string",
                         "enum": list(LENGTH_BANDS),
                     },
-                    "content_direction": {"type": "string"},
+                    "content_focus": {"type": "string"},
+                    "question_target": {"type": "string"},
                     "tone": {"type": "string"},
                 },
                 "required": [
@@ -147,7 +149,8 @@ DECISION_SCHEMA = {
                     "reflection_depth",
                     "relationship_register",
                     "length_band",
-                    "content_direction",
+                    "content_focus",
+                    "question_target",
                     "tone",
                 ],
                 "additionalProperties": False,
@@ -212,6 +215,19 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
         raise ValueError("follow-up primary_move requires follow-up or clarify question_plan")
     if primary_move == "follow-up" and question_plan == "reciprocal":
         raise ValueError("follow-up primary_move cannot use reciprocal question_plan")
+    question_target = _text(
+        plan["question_target"], "message_plan.question_target", allow_empty=True
+    )
+    if question_plan == "none" and question_target:
+        raise ValueError("question_target must be empty when question_plan is none")
+    if question_plan != "none" and not question_target:
+        raise ValueError("question_target is required when question_plan permits a question")
+    content_focus = _text(plan["content_focus"], "message_plan.content_focus")
+    if re.search(
+        r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
+        content_focus.casefold(),
+    ):
+        raise ValueError("content_focus must not contain a question instruction")
 
     bubble_count = _integer(plan["bubble_count"], "message_plan.bubble_count")
     if not 1 <= bubble_count <= 6:
@@ -255,7 +271,8 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
                 "message_plan.relationship_register",
             ),
             "length_band": _enum(plan["length_band"], LENGTH_BANDS, "message_plan.length_band"),
-            "content_direction": _text(plan["content_direction"], "message_plan.content_direction"),
+            "content_focus": content_focus,
+            "question_target": question_target,
             "tone": _text(plan["tone"], "message_plan.tone"),
         },
     }

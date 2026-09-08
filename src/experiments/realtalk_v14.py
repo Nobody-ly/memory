@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_9_v9_content_anchored_behavior_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_10_single_source_turn_contract"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -71,8 +71,8 @@ warmer, more inquisitive, or more comprehensive response. Never copy or reconstr
 Keep speaker ownership exact. A workplace, activity, feeling, plan, preference, or experience stated by the
 partner remains the partner's fact. Never turn it into the target's self-disclosure. Do not introduce a
 concrete autobiographical topic solely because it appears in a Ca example or the Self Domain; the visible Cb
-history must make that content current. The content_direction describes what this turn should contribute,
-not a draft and not a list of old persona attributes to demonstrate.
+history must make that content current. content_focus describes only what this turn should contribute,
+not a draft, not a question instruction, and not a list of old persona attributes to demonstrate.
 
 Plan one natural turn. A turn may contain several consecutive chat bubbles and compatible social moves.
 Select one primary move and at most one supporting move. question_plan is the
@@ -86,8 +86,10 @@ or reaction in the target's habitual rhythm. Most ordinary turns should have no 
 when it contributes content that the primary move cannot naturally carry. In particular, do not prepend an
 acknowledgement merely to make an answer or self-disclosure sound
 polite, engaged, or complete.
-The free-text content_direction must agree with question_plan: when question_plan is none, it must not ask,
-inquire, end with a question, or tell the Actor to find out another detail.
+Questions have one control source. content_focus must never contain ask/inquire/find-out instructions.
+When question_plan is none, question_target must be empty. Otherwise question_target must name only the
+specific information slot to ask about. The Actor receives these structured fields and no competing question
+instruction.
 
 lambda_trace records how strongly the current partner-facing situation shapes this turn relative to the
 person's stable prior. It is not a reward and is not fixed near zero. A direct question, explicit support
@@ -159,9 +161,6 @@ PAST CA BEHAVIOR ANALOGUES:
 PRIVATE CURRENT SITUATION:
 {situation}
 
-FROZEN V9 CONTENT FOCUS (what to talk about, not wording to copy):
-{content_focus}
-
 PRIVATE TURN PLAN (structured fields are authoritative):
 {message_plan}
 
@@ -169,8 +168,8 @@ Write one natural conversational turn as {speaker}. Complete the primary move an
 supporting moves in the plan. Match the planned relationship register, reflection depth, length band, and
 question plan. Ask no information-seeking question when question_plan is none; when it permits a question,
 ask exactly one. Produce exactly bubble_count non-empty chat
-bubbles, separated with newline characters and without numbers or labels. Use the frozen content focus to
-decide what the turn is about; the new plan controls how that content is expressed. Prefer the shortest natural
+bubbles, separated with newline characters and without numbers or labels. Use content_focus to decide what
+the turn is about and question_target only when question_plan permits it. Prefer the shortest natural
 wording that completes the content focus. A typical chat turn is not a request for a comprehensive answer.
 Keep short plans compact; do not turn them into polished explanations merely to fill several bubbles. Ca
 analogue metadata describes old turn
@@ -359,7 +358,6 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     relevant_user_domain=_json(decision["relevant_user_domain"]),
                     behavior_examples=_json(actor_examples),
                     situation=_json(decision["situation"]),
-                    content_focus=_json(_v9_content_focus(v9["next_action"])),
                     message_plan=_json(_actor_plan_view(decision["message_plan"])),
                 ),
                 speaker=point["speaker"],
@@ -442,7 +440,9 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "v9_decision_used_as_conservative_prior": True,
         "v9_alignment_visible_to_v14": False,
         "v9_generated_text_visible_to_v14": False,
-        "v9_content_direction_visible_to_actor": True,
+        "v9_content_direction_visible_to_actor": False,
+        "decision_content_focus_visible_to_actor": True,
+        "single_authoritative_question_contract": True,
         "deterministic_bubble_layout_normalization": True,
         "regenerated_stages": ["decision", "actor"],
         "frozen_stages": ["self_domain", "user_domain"],
@@ -691,7 +691,7 @@ def normalize_bubble_layout(message: str, target_count: int) -> tuple[str, dict[
 def decision_plan_audit(plan: dict[str, Any]) -> dict[str, Any]:
     direction_mentions_question = bool(re.search(
         r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
-        plan["content_direction"].casefold(),
+        plan["content_focus"].casefold(),
     ))
     return {
         "question_plan_is_authoritative": True,
@@ -713,13 +713,9 @@ def _actor_plan_view(plan: dict[str, Any]) -> dict[str, Any]:
             "relationship_register",
             "length_band",
             "tone",
+            "content_focus",
+            "question_target",
         )
-    }
-
-
-def _v9_content_focus(next_action: dict[str, Any]) -> dict[str, str]:
-    return {
-        "content_direction": str(next_action.get("content_direction", "")).strip(),
     }
 
 
