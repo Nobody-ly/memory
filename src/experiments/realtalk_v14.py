@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_ca_behavior_turn_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_1_ca_behavior_turn_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -61,11 +61,19 @@ current reality. Treat retrieved Ca examples as evidence of how this person tend
 similar conversational triggers; their concrete facts are past context, never current facts to copy.
 Use at most two User Domain facts and only when they directly matter now.
 
+Keep speaker ownership exact. A workplace, activity, feeling, plan, preference, or experience stated by the
+partner remains the partner's fact. Never turn it into the target's self-disclosure. Do not introduce a
+concrete autobiographical topic solely because it appears in a Ca example or the Self Domain; the visible Cb
+history must make that content current. The content_direction describes what this turn should contribute,
+not a draft and not a list of old persona attributes to demonstrate.
+
 Plan one natural turn. A turn may contain several consecutive chat bubbles and several compatible social
 moves. Select one primary move and up to two supporting moves in their intended order. Do not force a
 question, reflection, acknowledgement, or self-disclosure; include each only when the visible interaction,
 the person's observed behavior, or close Ca analogues support it. Conversely, do not compress a naturally
 multi-part response into a mechanical single action when the person regularly combines moves.
+The free-text content_direction must agree with question_plan: when question_plan is none, it must not ask,
+inquire, end with a question, or tell the Actor to find out another detail.
 
 lambda_trace records how strongly the current partner-facing situation shapes this turn relative to the
 person's stable prior. It is not a reward and is not fixed near zero. A direct question, explicit support
@@ -139,9 +147,11 @@ PRIVATE TURN PLAN:
 
 Write one natural conversational turn as {speaker}. Complete the primary move and only the compatible
 supporting moves in the plan. Match the planned relationship register, reflection depth, length band, and
-question plan. When bubble_count is greater than one, separate consecutive chat bubbles with newline
-characters; do not number or label them. Ca analogue wording and concrete events belong to old conversations:
-use them only to learn interaction shape and style, never present them as current facts or copy their text.
+question plan. Ask no question when question_plan is none. Produce exactly bubble_count non-empty chat
+bubbles, separated with newline characters and without numbers or labels. Keep short plans compact; do not
+turn them into polished explanations merely to fill several bubbles. Ca analogue metadata describes old turn
+shape only and contains no current facts. A fact stated by the partner remains the partner's fact and must
+not be rewritten as your own experience, workplace, activity, feeling, plan, or preference.
 Do not mention the plan, domains, examples, or any internal reasoning."""
 
 
@@ -298,9 +308,10 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
             actor_examples = [
                 {
                     "trigger": item["trigger"],
-                    "previous_turn": item["previous_turn"],
-                    "target_turn": item["target_turn"],
                     "bubble_count": item["bubble_count"],
+                    "character_count": item["character_count"],
+                    "contains_question": item["contains_question"],
+                    "contains_reflective_marker": item["contains_reflective_marker"],
                 }
                 for item in analogues
             ]
@@ -709,14 +720,17 @@ def _validate_v14_context(
             raise ValueError(
                 "direct partner question/support trigger requires a genuinely partner-shaped plan"
             )
+    direction = plan["content_direction"].casefold()
+    if plan["question_plan"] == "none" and re.search(
+        r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
+        direction,
+    ):
+        raise ValueError("content_direction requests a question while question_plan is none")
     return value
 
 
 def _v14_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:
-    view = _behavioral_self_domain(self_domain)
-    view["stable_identity_context"] = self_domain["identity_context"]
-    view["boundaries_and_uncertainty"] = self_domain["boundaries_and_uncertainty"]
-    return view
+    return _behavioral_self_domain(self_domain)
 
 
 def _behavior_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:

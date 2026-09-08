@@ -20,6 +20,7 @@ from src.experiments.realtalk_v14 import (
     run_v14,
     summarize_behavior_bank,
     V14Config,
+    _validate_v14_context,
 )
 from src.experiments.exp1_protocol import stable_hash
 from src.experiments.realtalk_v14_schemas import normalize_v14_decision
@@ -244,6 +245,20 @@ class RealTalkV14Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at most one question"):
             normalize_v14_decision(invalid)
 
+    def test_decision_rejects_question_instruction_when_plan_forbids_it(self):
+        invalid = _decision()
+        invalid["message_plan"].update({
+            "supporting_moves": ["acknowledge"],
+            "question_plan": "none",
+            "content_direction": "Acknowledge the point and end with a question.",
+        })
+        with self.assertRaisesRegex(ValueError, "requests a question"):
+            _validate_v14_context(
+                normalize_v14_decision(invalid),
+                trigger="after-partner-statement",
+                has_history=True,
+            )
+
     def test_actor_prompt_has_no_metrics_lambda_or_full_user_domain(self):
         lower = ACTOR_USER_TEMPLATE.casefold()
         self.assertNotIn("lambda", lower)
@@ -315,6 +330,8 @@ class RealTalkV14Tests(unittest.TestCase):
             actor_calls = [call for call in backend.calls if call["schema"] is None and "PRIVATE TURN PLAN" in call["user"]]
             self.assertEqual(len(actor_calls), 6)
             self.assertTrue(all("V9 frozen output" not in call["user"] for call in actor_calls))
+            self.assertTrue(all("target_turn" not in call["user"] for call in actor_calls))
+            self.assertTrue(all("identity_context" not in call["user"] for call in actor_calls))
 
 
 if __name__ == "__main__":
