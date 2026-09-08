@@ -26,6 +26,7 @@ from src.experiments.realtalk_v14 import (
     normalize_bubble_layout,
     retrieve_ca_behavior_examples,
     run_v14,
+    select_v9_contiguous_window,
     summarize_behavior_bank,
 )
 from src.experiments.exp1_protocol import stable_hash
@@ -202,6 +203,15 @@ class RealTalkV14Tests(unittest.TestCase):
                 )
                 cells.append(count)
         self.assertEqual(cells, [1] * 30)
+
+    def test_contiguous_window_preserves_canonical_v9_order(self):
+        rows = [{"result_id": f"sample-{index}"} for index in range(1, 8)]
+        self.assertEqual(
+            select_v9_contiguous_window(rows, start_1based=3, count=4),
+            ["sample-3", "sample-4", "sample-5", "sample-6"],
+        )
+        with self.assertRaisesRegex(ValueError, "beyond"):
+            select_v9_contiguous_window(rows, start_1based=6, count=3)
 
     def test_ca_bank_preserves_multibubble_text_and_source_ids(self):
         item = self.prepared[0]

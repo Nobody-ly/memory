@@ -204,7 +204,9 @@ class V14Config:
     v9_predictions: str = ""
     v9_self_domains: str = ""
     output_dir: str = "data/realtalk_v14_gate6"
-    gate: int = 6
+    gate: int | None = 6
+    contiguous_start: int | None = None
+    contiguous_count: int | None = None
     model: str = MODEL
     operation_max_attempts: int = 3
     model_call_timeout_seconds: int = 240
@@ -247,7 +249,29 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
     point_index, speaker_index = _index_prepared(prepared)
     _validate_v9_alignment(v9_rows, self_domains, point_index)
     gate_manifest = build_progressive_gate_manifest(prepared)
-    selected_ids = gate_manifest[str(config.gate)]
+    if config.gate is not None:
+        selected_ids = gate_manifest[str(config.gate)]
+        selection_manifest = {
+            "mode": "progressive_gate",
+            "gate": config.gate,
+            "selected_result_count": len(selected_ids),
+            "first_result_id": selected_ids[0],
+            "last_result_id": selected_ids[-1],
+        }
+    else:
+        selected_ids = select_v9_contiguous_window(
+            v9_rows,
+            start_1based=config.contiguous_start,
+            count=config.contiguous_count,
+        )
+        selection_manifest = {
+            "mode": "canonical_v9_contiguous_window",
+            "start_1based": config.contiguous_start,
+            "end_1based": config.contiguous_start + config.contiguous_count - 1,
+            "selected_result_count": len(selected_ids),
+            "first_result_id": selected_ids[0],
+            "last_result_id": selected_ids[-1],
+        }
     v9_index = {row["result_id"]: row for row in v9_rows}
 
     behavior_banks = {
@@ -276,6 +300,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "dataset_manifest": dataset_manifest,
         "v9_source": source,
         "progressive_gate_manifest": gate_manifest,
+        "selection_manifest": selection_manifest,
         "decision_schema": DECISION_SCHEMA,
         "prompt_hashes": _prompt_hashes(),
         "implementation_commit": _repository_commit(),
@@ -447,6 +472,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
     _write_json(output_dir / "unresolved_errors.json", unresolved)
     _write_json(output_dir / "dataset_manifest.json", dataset_manifest)
     _write_json(output_dir / "progressive_gate_manifest.json", gate_manifest)
+    _write_json(output_dir / "selection_manifest.json", selection_manifest)
     _write_json(output_dir / "behavior_banks.json", behavior_banks)
     _write_json(output_dir / "behavior_summaries.json", behavior_summaries)
     _write_json(output_dir / "diagnostics.json", diagnostics)
@@ -478,6 +504,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "retrieval_source": "target-speaker turns from paper-assigned Ca first three sessions",
         "source_v9": source,
         "gate": config.gate,
+        "selection": selection_manifest,
         "selected_result_ids_sha256": stable_hash(selected_ids),
         "selected_result_count": len(selected_ids),
         "prompt_hashes": _prompt_hashes(),
@@ -497,6 +524,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
             "completed_at_utc": _now(),
             "records": len(results),
             "gate": config.gate,
+            "selection": selection_manifest,
             "model": backend.model,
             "run_signature": signature,
         })
@@ -504,6 +532,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "generation_complete": complete,
         "records": len(results),
         "expected_records": len(selected_ids),
+        "selection": selection_manifest,
         "unresolved": unresolved,
         "diagnostics": diagnostics,
         "output_dir": str(output_dir),
@@ -655,6 +684,32 @@ def build_progressive_gate_manifest(
     }
     _validate_gate_manifest(manifest, all_ids)
     return manifest
+
+
+def select_v9_contiguous_window(
+    v9_rows: list[dict[str, Any]],
+    *,
+    start_1based: int | None,
+    count: int | None,
+) -> list[str]:
+    """Select one uninterrupted range in canonical V9 prediction order."""
+    if start_1based is None or count is None:
+        raise ValueError("contiguous window requires both start and count")
+    if start_1based < 1:
+        raise ValueError("contiguous window start must be at least 1")
+    if count < 1:
+        raise ValueError("contiguous window count must be positive")
+    end = start_1based - 1 + count
+    if end > len(v9_rows):
+        raise ValueError(
+            f"contiguous window ends at {end}, beyond {len(v9_rows)} V9 rows"
+        )
+    result_ids = [
+        str(row["result_id"]) for row in v9_rows[start_1based - 1:end]
+    ]
+    if len(result_ids) != len(set(result_ids)):
+        raise ValueError("contiguous V9 window contains duplicate result IDs")
+    return result_ids
 
 
 def actor_structure_audit(message: str, plan: dict[str, Any]) -> dict[str, Any]:
@@ -1064,8 +1119,20 @@ def _prompt_hashes() -> dict[str, str]:
 
 
 def _validate_config(config: V14Config) -> None:
-    if config.gate not in GATES:
+    has_gate = config.gate is not None
+    has_window = (
+        config.contiguous_start is not None or config.contiguous_count is not None
+    )
+    if has_gate == has_window:
+        raise ValueError("select exactly one progressive gate or contiguous window")
+    if has_gate and config.gate not in GATES:
         raise ValueError(f"gate must be one of {GATES}")
+    if has_window:
+        select_v9_contiguous_window(
+            [{"result_id": str(index)} for index in range(EXPECTED_RECORDS)],
+            start_1based=config.contiguous_start,
+            count=config.contiguous_count,
+        )
     if config.model != MODEL:
         raise ValueError(f"V14 model is frozen to {MODEL}")
     if config.operation_max_attempts != 3:
@@ -1081,7 +1148,8 @@ def _clear_outputs(output_dir: Path) -> None:
         "checkpoint.json", "checkpoint.json.tmp", "raw_responses.jsonl",
         "predictions.jsonl", "unresolved_errors.json", "dataset_manifest.json",
         "progressive_gate_manifest.json", "behavior_banks.json",
-        "behavior_summaries.json", "diagnostics.json", "run_manifest.json",
+        "selection_manifest.json", "behavior_summaries.json", "diagnostics.json",
+        "run_manifest.json",
         "GENERATION_COMPLETE", "preflight.json",
     ):
         path = output_dir / name
@@ -1152,7 +1220,14 @@ def parse_args() -> V14Config:
     parser.add_argument("--v9-predictions", required=True)
     parser.add_argument("--v9-self-domains", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--gate", type=int, choices=GATES, required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--gate", type=int, choices=GATES)
+    selection.add_argument(
+        "--contiguous-window",
+        type=int,
+        nargs=2,
+        metavar=("START_1BASED", "COUNT"),
+    )
     parser.add_argument("--model", default=MODEL, choices=(MODEL,))
     parser.add_argument("--model-call-timeout-seconds", type=int, default=240)
     parser.add_argument("--no-canonical-v9-check", action="store_true")
@@ -1160,12 +1235,17 @@ def parse_args() -> V14Config:
     mode.add_argument("--fresh", action="store_true")
     mode.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    contiguous_start, contiguous_count = (
+        args.contiguous_window if args.contiguous_window else (None, None)
+    )
     return V14Config(
         dataset_dir=args.dataset_dir,
         v9_predictions=args.v9_predictions,
         v9_self_domains=args.v9_self_domains,
         output_dir=args.output_dir,
         gate=args.gate,
+        contiguous_start=contiguous_start,
+        contiguous_count=contiguous_count,
         model=args.model,
         model_call_timeout_seconds=args.model_call_timeout_seconds,
         fresh=args.fresh,
