@@ -222,3 +222,22 @@ V14.4 完成 5/6；成功样本的问题权限 5/5、气泡数 4/5 一致。Nico
 主动作，导致 unresolved。Turn Bundle 本来就允许“先回应、再追问”，因此 V14.5 删除该反向
 绑定，只保留“主动作若为 follow-up，question_plan 必须实际允许问句”的单向约束。Schema
 变更后使用新协议和目录，再从 Gate 6 复测。
+
+V14.5 完成 6/6、零 unresolved、气泡结构 6/6，但配对指标仍低于同 ID 的 V9：
+
+| 指标 | V9 同 ID | V14.5 |
+|---|---:|---:|
+| Reflectiveness | 0.667 | 0.333 |
+| Grounding | 0.833 | 0.667 |
+| Empathy AD | 1.167 | 2.167 |
+| ROUGE | 0.175 | 0.111 |
+| BERTScore | 0.859 | 0.844 |
+
+这说明主要退化来自重新决策，而非格式。V14.6 改为 V9-anchored：
+
+- 冻结的 V9 Situation/Alignment/Next Action 作为保守行为先验；
+- 只有当前真实历史与相近 Ca 行为证据共同提供强证据时才改变主动作；
+- 新模块主要负责 turn 气泡结构和有证据的组合动作，不把单动作自动升级成更温暖、更完整的回复；
+- V9 generated message 永不进入 V14 Prompt，避免成为文本重写或自蒸馏。
+
+Prompt 变更后，V14.6 使用新协议和新目录，从 Gate 6 开始。

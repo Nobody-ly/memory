@@ -324,6 +324,13 @@ class RealTalkV14Tests(unittest.TestCase):
                     "self_domain_hash": stable_hash(self_domains[item["speaker"]]),
                     "user_domain": empty_user_domain(),
                     "user_domain_completed_session_updates": [],
+                    "situation": _decision()["situation"],
+                    "alignment": _decision()["alignment"],
+                    "next_action": {
+                        "primary_move": "answer",
+                        "question_mode": "none",
+                        "continuation_move": "none",
+                    },
                 })
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -359,6 +366,9 @@ class RealTalkV14Tests(unittest.TestCase):
             self.assertTrue(all("V9 frozen output" not in call["user"] for call in actor_calls))
             self.assertTrue(all("target_turn" not in call["user"] for call in actor_calls))
             self.assertTrue(all("identity_context" not in call["user"] for call in actor_calls))
+            decision_calls = [call for call in backend.calls if call["schema"] is not None]
+            self.assertTrue(all("FROZEN V9 DECISION PRIOR" in call["user"] for call in decision_calls))
+            self.assertTrue(all("V9 frozen output" not in call["user"] for call in decision_calls))
 
 
 if __name__ == "__main__":

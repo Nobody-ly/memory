@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_5_ca_behavior_turn_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_6_v9_anchored_behavior_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -60,6 +60,13 @@ Use the target's fixed Self Domain as identity and voice. Read the complete visi
 current reality. Treat retrieved Ca examples as evidence of how this person tends to compose a turn after
 similar conversational triggers; their concrete facts are past context, never current facts to copy.
 Use at most two User Domain facts and only when they directly matter now.
+
+The frozen V9 Decision is a conservative behavioral prior produced from the same causal history and frozen
+upstream domains. Preserve its primary conversational choice unless the visible history and close Ca behavior
+analogues provide strong, specific evidence that it mismatches this person's habitual response. Do not add
+supporting moves merely because V9 used a single move. The main purpose of the new plan is to represent the
+natural structure of a turn, including multiple bubbles when supported, without turning it into a more ideal,
+warmer, more inquisitive, or more comprehensive response. Never copy or reconstruct the V9 generated text.
 
 Keep speaker ownership exact. A workplace, activity, feeling, plan, preference, or experience stated by the
 partner remains the partner's fact. Never turn it into the target's self-disclosure. Do not introduce a
@@ -110,6 +117,9 @@ LATEST PARTNER TURN:
 {latest_partner_turn}
 
 CURRENT INTERACTION TRIGGER (deterministic hint): {current_trigger}
+
+FROZEN V9 DECISION PRIOR (behavioral anchor, not text to reproduce):
+{v9_decision_prior}
 
 TARGET'S OBSERVED CA BEHAVIOR SUMMARY:
 {behavior_summary}
@@ -290,6 +300,11 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                         if latest_partner else "NONE"
                     ),
                     current_trigger=current_trigger,
+                    v9_decision_prior=_json({
+                        "situation": v9["situation"],
+                        "alignment": v9["alignment"],
+                        "next_action": v9["next_action"],
+                    }),
                     behavior_summary=_json(behavior_summaries[point["speaker"]]),
                     behavior_examples=_json(analogues),
                     online_behavior=_json(
@@ -362,6 +377,11 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 },
                 "generated_message": generated,
                 "v9_generated_message": v9["generated_message"],
+                "v9_decision_prior_hash": stable_hash({
+                    "situation": v9["situation"],
+                    "alignment": v9["alignment"],
+                    "next_action": v9["next_action"],
+                }),
                 "ca_behavior_trigger": current_trigger,
                 "ca_behavior_examples": analogues,
                 "online_target_behavior": summarize_visible_target_behavior(
@@ -407,6 +427,8 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "thinking_enabled": {"decision": False, "actor": False},
         "training_or_finetuning": False,
         "frozen_v9_upstream": True,
+        "v9_decision_used_as_conservative_prior": True,
+        "v9_generated_text_visible_to_v14": False,
         "regenerated_stages": ["decision", "actor"],
         "frozen_stages": ["self_domain", "user_domain"],
         "omega_enabled": False,
