@@ -11,6 +11,7 @@ from src.experiments.realtalk_ours import RealTalkOursConfig, _prepare_dataset
 from src.experiments.realtalk_ours_schemas import empty_user_domain
 from src.experiments.realtalk_v14 import (
     ACTOR_USER_TEMPLATE,
+    DECISION_SYSTEM_PROMPT,
     DECISION_USER_TEMPLATE,
     V14Config,
     _actor_plan_view,
@@ -294,6 +295,12 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertNotIn("grounding", lower)
         self.assertNotIn("five-layer user domain", lower)
         self.assertIn("relevant partner facts", lower)
+
+    def test_decision_prompt_maps_v9_question_controls_explicitly(self):
+        lower = DECISION_SYSTEM_PROMPT.casefold()
+        self.assertIn("continuation_move=reciprocal-question", lower)
+        self.assertIn("question_mode=follow-up", lower)
+        self.assertIn("question_plan cannot be none", lower)
 
     def test_actor_structure_audit_reports_without_rewriting(self):
         audit = actor_structure_audit("First bubble\nSecond bubble?", _decision()["message_plan"])

@@ -278,3 +278,9 @@ V14.9 完成 6/6、零 unresolved，并通过仅修改空白的排版归一化�
 
 Actor 不再直接读取 V9 内容方向；V9 Situation/Next Action 仍只作为 Decision 的保守先验。
 V14.10 使用新协议和目录，从同一 Gate 6 再次验证单一权威问题合同。
+
+V14.10 的 5 条成功结果均满足气泡和问题权限，但 Emi 连续三次在 `decision_basis` 中明确判定
+应回问姓名，同时错误输出 `question_plan=none`，因此最终为 5/6。V14.11 在 Decision Prompt
+增加字段映射与自洽检查：V9 `continuation_move=reciprocal-question` 对应 `reciprocal`，V9
+`question_mode=follow-up` 对应 `follow-up`；只有可见历史或 Ca 行为证据提供具体反证时才能放弃，
+并且理由不能继续描述要问。该修正不读取答案、不修改策略结果，只消除理由与 Schema 的矛盾。

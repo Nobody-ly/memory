@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_10_single_source_turn_contract"
+PROTOCOL = "realtalk_task1_ours_v14_11_consistent_turn_contract"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -90,6 +90,11 @@ Questions have one control source. content_focus must never contain ask/inquire/
 When question_plan is none, question_target must be empty. Otherwise question_target must name only the
 specific information slot to ask about. The Actor receives these structured fields and no competing question
 instruction.
+Before returning the schema, reconcile the rationale and fields: if decision_basis says this turn should ask
+a question, question_plan cannot be none. In the frozen V9 prior, continuation_move=reciprocal-question maps
+to question_plan=reciprocal unless strong visible-history or Ca evidence justifies dropping it. If you drop it,
+decision_basis must explicitly say why and must not still describe asking. V9 question_mode=follow-up maps to
+question_plan=follow-up under the same rule.
 
 lambda_trace records how strongly the current partner-facing situation shapes this turn relative to the
 person's stable prior. It is not a reward and is not fixed near zero. A direct question, explicit support
