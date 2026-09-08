@@ -79,10 +79,35 @@ BERTScore、Reflectiveness 和 Sentiment 下降。尤其 Reflectiveness 从 Gate
 0.567，表明 Gate 18 的局部结果不能外推为稳定提升。
 
 结构审计同样未完全通过：30 条气泡计划均匹配，但问题权限仅 28/30 匹配；两条 Actor 在
-Decision 未授权时自行追加问题。因此 V14.12 不进入 Gate 60，避免在已知未过 Gate 30 的
-版本上继续消耗评价成本。
+Decision 未授权时自行追加问题。按原 Gate 规则应在此停止；随后为了专门判断小样本波动，
+在用户明确要求下保持配置完全冻结，额外执行了一轮 Gate 60 压力验证。
 
-## 5. 后续尝试与停止
+## 5. Gate 60 冻结配置压力验证
+
+Gate 60 复用前 30 条检查点，只新增 30 条。最终 60/60 成功、零 unresolved，仍覆盖 10 位
+人物与三个 Session。与前述结果相同，V9 和 V14.12 严格按相同 result ID 配对，参考答案的
+180 个 GPT 判断全部从 V9 checkpoint 复用。
+
+| 指标 | 论文逐列最优 | V9 同 60 条 | V14.12 | V14.12 - V9 |
+|---|---:|---:|---:|---:|
+| ROUGE | 0.140 | 0.196 | 0.191 | -0.005 |
+| BERTScore | 0.780 | 0.866 | 0.863 | -0.003 |
+| Reflectiveness | 0.770 | 0.783 | 0.783 | 0.000 |
+| Grounding | 0.620 | 0.633 | 0.667 | +0.033 |
+| Sentiment | 0.590 | 0.683 | 0.683 | 0.000 |
+| Emotion | 0.460 | 0.617 | 0.650 | +0.033 |
+| Intimacy AD（低优） | 0.060 | 0.0630 | 0.0613 | -0.0016 |
+| Empathy AD（低优） | 1.240 | 0.883 | 0.917 | +0.033 |
+
+V14.12 与同样本 V9 均超过论文逐列最优 7/8，唯一未通过项都是 Intimacy AD。V14.12 的
+Grounding、Emotion 和 Intimacy AD 略优于 V9，Reflectiveness 与 Sentiment 持平；ROUGE、
+BERTScore 和 Empathy AD 略差。因同 60 条 V9 本身也远好于其完整 519 条结果，Gate 60 的
+高分主要说明该确定性子集较容易，不能归因于 V14 改造。
+
+结构稳定性仍有问题：气泡数 60/60 匹配，但问题权限只有 48/60 匹配。虽然这批 Grounding
+没有因此下降，Actor 未严格执行 Decision 的现象仍不能作为正式协议缺陷忽略。
+
+## 6. 后续尝试与停止
 
 V14.13 将 Actor 温度由 0.6 降到 0.3，并收紧普通动作的反思和长度规则。Gate 6 仍出现明显
 扩写，说明退化不是采样温度造成。
@@ -93,7 +118,7 @@ Situation 和 lambda 只在 Decision 生效，不二次注入 Actor。Gate 18 �
 0.800、Emotion 0.450、Intimacy AD 0.052、Empathy AD 1.350。它相对 V14.12 多项下降，按渐进
 门槛停止，不进入 Gate 30。
 
-## 6. 产物位置
+## 7. 产物位置
 
 - V14.12 生成：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-progressive-v1-60c496f`
 - V14.12 Gate 18 快照：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate18-snapshot-v1-60c496f`
@@ -102,14 +127,19 @@ Situation 和 lambda 只在 Decision 生效，不二次注入 Actor。Gate 18 �
 - V14.12 Gate 30 快照：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate30-snapshot-v1-60c496f`
 - V14.12 Gate 30 本地指标：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate30-local-v1`
 - V14.12 Gate 30 Judge：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate30-judge-v1`
+- V14.12 Gate 60 快照：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate60-snapshot-v1-60c496f`
+- V14.12 Gate 60 本地指标：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate60-local-v1`
+- V14.12 Gate 60 Judge：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-12-gate60-judge-v1`
 - V14.14 生成：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-14-progressive-v1-78fc884`
 - V14.14 本地指标：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-14-gate18-local-v1`
 - V14.14 Judge：`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-ours-v14-14-gate18-judge-v1`
 
-## 7. 当前判断
+## 8. 当前判断
 
-V14.12 是应保留的诊断候选，但 Gate 30 已确认它不足以升级为完整实验版本。V14.13/V14.14
-证明单纯降低温度、增加负向规则或减少 Actor 输入不能解决 Reflectiveness；V14.12 的均衡
-扩容又证明 Gate 18 的优势不稳定。下一轮应从冻结的 V9 重新建立新版本，使用未见样本验证
-新的内容实现机制，或更换更能严格执行 Turn Plan 的 Actor 模型，并重新从 Gate 6 开始，
-不能把 V14.12 继续扩到 60 或 519 条。
+V14.12 是应保留的诊断候选。Gate 60 证明它没有全面退化，并在 Grounding、Emotion 和
+Intimacy AD 上提供了小幅配对改善；但它没有形成相对 V9 的全面优势，而且问题权限遵循率
+下降至 80%。Gate 18、30、60 的大幅摆动同时说明，小规模均值很受样本难度影响。
+
+若继续验证，下一阶段应扩到预先定义的 Gate 120，并保持 V14.12 完全冻结；该阶段的目的应
+是检查稳定性，而不是把 Gate 60 的 7/8 宣称为正式结果。只有 Gate 120 仍稳定且结构缺陷可被
+明确解释时，才值得决定是否运行 519 条。
