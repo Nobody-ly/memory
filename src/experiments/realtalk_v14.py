@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_3_ca_behavior_turn_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_4_ca_behavior_turn_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -68,7 +68,9 @@ history must make that content current. The content_direction describes what thi
 not a draft and not a list of old persona attributes to demonstrate.
 
 Plan one natural turn. A turn may contain several consecutive chat bubbles and several compatible social
-moves. Select one primary move and up to two supporting moves in their intended order. Do not force a
+moves. Select one primary move and up to two supporting moves in their intended order. question_plan is the
+only place that controls whether the turn asks a question; do not encode a question as a supporting move.
+Do not force a
 question, reflection, acknowledgement, or self-disclosure; include each only when the visible interaction,
 the person's observed behavior, or close Ca analogues support it. Conversely, do not compress a naturally
 multi-part response into a mechanical single action when the person regularly combines moves.
@@ -147,7 +149,7 @@ PAST CA BEHAVIOR ANALOGUES:
 PRIVATE CURRENT SITUATION:
 {situation}
 
-PRIVATE TURN PLAN:
+PRIVATE TURN PLAN (structured fields are authoritative):
 {message_plan}
 
 Write one natural conversational turn as {speaker}. Complete the primary move and only the compatible
@@ -338,7 +340,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     relevant_user_domain=_json(decision["relevant_user_domain"]),
                     behavior_examples=_json(actor_examples),
                     situation=_json(decision["situation"]),
-                    message_plan=_json(decision["message_plan"]),
+                    message_plan=_json(_actor_plan_view(decision["message_plan"])),
                 ),
                 speaker=point["speaker"],
                 max_attempts=config.operation_max_attempts,
@@ -369,6 +371,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 "relevant_user_domain": decision["relevant_user_domain"],
                 "alignment": decision["alignment"],
                 "message_plan": decision["message_plan"],
+                "actor_plan": _actor_plan_view(decision["message_plan"]),
                 "decision_plan_audit": decision_plan_audit(decision["message_plan"]),
                 "actor_structure_audit": actor_structure_audit(
                     generated, decision["message_plan"]
@@ -622,6 +625,21 @@ def decision_plan_audit(plan: dict[str, Any]) -> dict[str, Any]:
         "direction_question_conflict": (
             plan["question_plan"] == "none" and direction_mentions_question
         ),
+    }
+
+
+def _actor_plan_view(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: plan[key] for key in (
+            "primary_move",
+            "supporting_moves",
+            "bubble_count",
+            "question_plan",
+            "reflection_depth",
+            "relationship_register",
+            "length_band",
+            "tone",
+        )
     }
 
 

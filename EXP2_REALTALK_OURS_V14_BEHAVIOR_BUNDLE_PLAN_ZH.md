@@ -204,3 +204,15 @@ V14.2 完成 6/6、零 unresolved，lambda 在三种方向各 2 条，但配对 
 - 不为普通回复自动添加赞美、确认、关心或暖化措辞。
 
 V14.3 再次使用新协议和新目录，从 Gate 6 开始。
+
+V14.3 在 Gate 6 出现 5/6：模型减少辅助动作后，`question_plan=reciprocal` 不再重复写入
+`supporting_moves`，但旧 Schema 强制两处同时存在，导致 Kevin 连续三次校验失败。其余 5 条中
+仍有自由 `content_direction` 与结构化 question_plan 冲突，并使 Actor 产生额外问题。
+
+V14.4 统一控制源：
+
+- `question_plan` 是唯一问句控制字段；辅助动作枚举删除 follow-up/reciprocal-question；
+- Actor View 不披露自由 `content_direction`，由完整可见历史和 Situation 决定具体内容；
+- Decision 原始 content_direction 继续保存供审计，但不能覆盖结构化问题、反思和动作权限。
+
+Schema 已变更，V14.4 使用新协议和输出目录，再从 Gate 6 开始。

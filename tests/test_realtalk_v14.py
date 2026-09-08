@@ -13,6 +13,7 @@ from src.experiments.realtalk_v14 import (
     ACTOR_USER_TEMPLATE,
     DECISION_USER_TEMPLATE,
     actor_structure_audit,
+    _actor_plan_view,
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
     classify_interaction_trigger,
@@ -47,7 +48,7 @@ def _decision() -> dict:
         },
         "message_plan": {
             "primary_move": "answer",
-            "supporting_moves": ["self-disclose", "reciprocal-question"],
+            "supporting_moves": ["self-disclose"],
             "bubble_count": 2,
             "question_plan": "reciprocal",
             "reflection_depth": "surface",
@@ -244,8 +245,15 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertEqual(normalized["message_plan"]["bubble_count"], 2)
         invalid = _decision()
         invalid["message_plan"]["primary_move"] = "follow-up"
-        with self.assertRaisesRegex(ValueError, "at most one question"):
+        invalid["message_plan"]["question_plan"] = "reciprocal"
+        with self.assertRaisesRegex(ValueError, "follow-up or clarify"):
             normalize_v14_decision(invalid)
+
+    def test_actor_plan_has_one_question_control_and_no_free_direction(self):
+        view = _actor_plan_view(_decision()["message_plan"])
+        self.assertEqual(view["question_plan"], "reciprocal")
+        self.assertNotIn("content_direction", view)
+        self.assertNotIn("reciprocal-question", view["supporting_moves"])
 
     def test_structured_question_plan_remains_authoritative_over_free_text(self):
         invalid = _decision()

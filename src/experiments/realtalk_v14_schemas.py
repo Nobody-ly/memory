@@ -32,8 +32,6 @@ SUPPORTING_MOVES = (
     "answer",
     "self-disclose",
     "brief-reason",
-    "reciprocal-question",
-    "follow-up",
     "close",
 )
 QUESTION_PLANS = ("none", "reciprocal", "follow-up", "clarify")
@@ -210,19 +208,12 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
         raise ValueError("message_plan.supporting_moves must not contain duplicates")
 
     question_plan = _enum(plan["question_plan"], QUESTION_PLANS, "message_plan.question_plan")
-    question_moves = int(primary_move == "follow-up") + sum(
-        move in {"follow-up", "reciprocal-question"} for move in supporting_moves
-    )
-    if question_moves > 1:
-        raise ValueError("message_plan permits at most one question move")
-    if question_plan == "none" and question_moves:
-        raise ValueError("question move requires a non-none question_plan")
+    if primary_move == "follow-up" and question_plan not in {"follow-up", "clarify"}:
+        raise ValueError("follow-up primary_move requires follow-up or clarify question_plan")
     if question_plan in {"follow-up", "clarify"} and primary_move != "follow-up":
         raise ValueError("follow-up or clarify question_plan requires follow-up primary_move")
-    if question_plan == "reciprocal" and "reciprocal-question" not in supporting_moves:
-        raise ValueError("reciprocal question_plan requires reciprocal-question support")
-    if question_plan != "reciprocal" and "reciprocal-question" in supporting_moves:
-        raise ValueError("reciprocal-question support requires reciprocal question_plan")
+    if primary_move == "follow-up" and question_plan == "reciprocal":
+        raise ValueError("follow-up primary_move cannot use reciprocal question_plan")
 
     bubble_count = _integer(plan["bubble_count"], "message_plan.bubble_count")
     if not 1 <= bubble_count <= 6:
