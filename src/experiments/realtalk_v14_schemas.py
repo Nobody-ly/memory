@@ -210,8 +210,6 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
     question_plan = _enum(plan["question_plan"], QUESTION_PLANS, "message_plan.question_plan")
     if primary_move == "follow-up" and question_plan not in {"follow-up", "clarify"}:
         raise ValueError("follow-up primary_move requires follow-up or clarify question_plan")
-    if question_plan in {"follow-up", "clarify"} and primary_move != "follow-up":
-        raise ValueError("follow-up or clarify question_plan requires follow-up primary_move")
     if primary_move == "follow-up" and question_plan == "reciprocal":
         raise ValueError("follow-up primary_move cannot use reciprocal question_plan")
 

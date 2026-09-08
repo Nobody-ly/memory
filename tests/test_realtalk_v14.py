@@ -240,14 +240,23 @@ class RealTalkV14Tests(unittest.TestCase):
             "session-opening",
         )
 
-    def test_decision_schema_accepts_bundle_and_rejects_two_questions(self):
+    def test_decision_schema_accepts_bundle_and_rejects_questionless_followup(self):
         normalized = normalize_v14_decision(_decision())
         self.assertEqual(normalized["message_plan"]["bubble_count"], 2)
         invalid = _decision()
         invalid["message_plan"]["primary_move"] = "follow-up"
-        invalid["message_plan"]["question_plan"] = "reciprocal"
+        invalid["message_plan"]["question_plan"] = "none"
         with self.assertRaisesRegex(ValueError, "follow-up or clarify"):
             normalize_v14_decision(invalid)
+
+    def test_followup_question_can_support_an_acknowledgement(self):
+        value = _decision()
+        value["message_plan"].update({
+            "primary_move": "acknowledge",
+            "question_plan": "follow-up",
+        })
+        normalized = normalize_v14_decision(value)
+        self.assertEqual(normalized["message_plan"]["question_plan"], "follow-up")
 
     def test_actor_plan_has_one_question_control_and_no_free_direction(self):
         view = _actor_plan_view(_decision()["message_plan"])

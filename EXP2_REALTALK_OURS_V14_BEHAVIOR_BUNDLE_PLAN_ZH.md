@@ -216,3 +216,9 @@ V14.4 统一控制源：
 - Decision 原始 content_direction 继续保存供审计，但不能覆盖结构化问题、反思和动作权限。
 
 Schema 已变更，V14.4 使用新协议和输出目录，再从 Gate 6 开始。
+
+V14.4 完成 5/6；成功样本的问题权限 5/5、气泡数 4/5 一致。Nicolas 的 Decision 三次选择
+“acknowledge 主动作 + follow-up 问句”，旧 normalizer 却错误要求 follow-up 问句必须同时是
+主动作，导致 unresolved。Turn Bundle 本来就允许“先回应、再追问”，因此 V14.5 删除该反向
+绑定，只保留“主动作若为 follow-up，question_plan 必须实际允许问句”的单向约束。Schema
+变更后使用新协议和目录，再从 Gate 6 复测。
