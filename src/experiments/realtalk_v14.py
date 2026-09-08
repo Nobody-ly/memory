@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_7_v9_action_anchored_behavior_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_8_v9_action_anchored_behavior_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -316,12 +316,11 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     ),
                 ),
                 schema=DECISION_SCHEMA,
-                normalizer=lambda value, domain=v9["user_domain"], trigger=current_trigger: (
+                normalizer=lambda value, domain=v9["user_domain"]: (
                     _validate_v14_context(
                         _validate_decision_profile_activation(
                             normalize_v14_decision(value), domain
                         ),
-                        trigger=trigger,
                         has_history=bool(point["context_turns"]),
                     )
                 ),
@@ -388,6 +387,9 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 "situation": decision["situation"],
                 "relevant_user_domain": decision["relevant_user_domain"],
                 "alignment": decision["alignment"],
+                "alignment_audit": alignment_consistency_audit(
+                    decision["alignment"], current_trigger
+                ),
                 "message_plan": decision["message_plan"],
                 "actor_plan": _actor_plan_view(decision["message_plan"]),
                 "decision_plan_audit": decision_plan_audit(decision["message_plan"]),
@@ -689,6 +691,9 @@ def aggregate_v14_diagnostics(results: list[dict[str, Any]]) -> dict[str, Any]:
         "decision_direction_question_conflicts": sum(
             row["decision_plan_audit"]["direction_question_conflict"] for row in results
         ),
+        "alignment_audit_warnings": sum(
+            bool(row["alignment_audit"]["warnings"]) for row in results
+        ),
         "candidate_multiline_rate": round(observed_multiline / len(results), 6),
         "ground_truth_multiline_rate": round(gt_multiline / len(results), 6),
     }
@@ -769,26 +774,33 @@ def _validate_v9_source(
 
 
 def _validate_v14_context(
-    value: dict[str, Any], *, trigger: str, has_history: bool
+    value: dict[str, Any], *, has_history: bool
 ) -> dict[str, Any]:
     plan = value["message_plan"]
-    alignment = value["alignment"]
     if not has_history and plan["primary_move"] != "open":
         raise ValueError("empty visible history requires an open primary move")
+    return value
+
+
+def alignment_consistency_audit(
+    alignment: dict[str, Any], trigger: str
+) -> dict[str, Any]:
     orientation = alignment["orientation"]
     lam = alignment["lambda_trace"]
+    warnings: list[str] = []
     if orientation == "self-led" and lam > 0.45:
-        raise ValueError("self-led orientation requires lambda_trace <= 0.45")
+        warnings.append("self_led_high_lambda")
     if orientation == "balanced" and not 0.25 <= lam <= 0.75:
-        raise ValueError("balanced orientation requires lambda_trace in [0.25,0.75]")
+        warnings.append("balanced_lambda_outside_typical_band")
     if orientation == "partner-adaptive" and lam < 0.55:
-        raise ValueError("partner-adaptive orientation requires lambda_trace >= 0.55")
-    if trigger in {"after-question", "after-support-request"}:
-        if orientation == "self-led" or lam < 0.4:
-            raise ValueError(
-                "direct partner question/support trigger requires a genuinely partner-shaped plan"
-            )
-    return value
+        warnings.append("partner_adaptive_low_lambda")
+    if trigger in {"after-question", "after-support-request"} and lam < 0.4:
+        warnings.append("partner_trigger_low_lambda")
+    return {
+        "non_blocking": True,
+        "trigger": trigger,
+        "warnings": warnings,
+    }
 
 
 def _v14_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:

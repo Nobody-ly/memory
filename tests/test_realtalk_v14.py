@@ -13,6 +13,7 @@ from src.experiments.realtalk_v14 import (
     ACTOR_USER_TEMPLATE,
     DECISION_USER_TEMPLATE,
     actor_structure_audit,
+    alignment_consistency_audit,
     _actor_plan_view,
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
@@ -258,6 +259,14 @@ class RealTalkV14Tests(unittest.TestCase):
         normalized = normalize_v14_decision(value)
         self.assertEqual(normalized["message_plan"]["question_plan"], "follow-up")
 
+    def test_lambda_inconsistency_is_audited_without_rejecting_persona_action(self):
+        audit = alignment_consistency_audit(
+            {"orientation": "self-led", "lambda_trace": 0.1},
+            "after-question",
+        )
+        self.assertTrue(audit["non_blocking"])
+        self.assertIn("partner_trigger_low_lambda", audit["warnings"])
+
     def test_actor_plan_has_one_question_control_and_no_free_direction(self):
         view = _actor_plan_view(_decision()["message_plan"])
         self.assertEqual(view["question_plan"], "reciprocal")
@@ -273,7 +282,6 @@ class RealTalkV14Tests(unittest.TestCase):
         })
         normalized = _validate_v14_context(
             normalize_v14_decision(invalid),
-            trigger="after-partner-statement",
             has_history=True,
         )
         audit = decision_plan_audit(normalized["message_plan"])

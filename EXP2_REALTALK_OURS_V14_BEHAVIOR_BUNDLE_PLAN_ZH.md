@@ -247,3 +247,9 @@ V14.6 把 V9 Alignment 也放入保守先验，结果 2 条出现“partner-adap
 锚定 V9 Situation 与 Next Action，不向新 Decision 披露 V9 orientation/lambda。这样保留 V9
 较稳的行为选择，同时让新 lambda 根据当前历史、Self/User Domain 与 Ca 行为证据独立计算。
 Prompt 变更后使用新协议和目录，从 Gate 6 开始。
+
+V14.7 在扩至 Gate 18 时完成 17/18；缺失样本连续三次选择 self-led/低 lambda 回应直接问题，
+被旧 validator 强制拒绝。该规则把“理解并回答伙伴”错误等同于必须偏离人物先验，不符合
+Persona Simulation。V14.8 将 orientation/lambda 的经验区间与 partner-trigger 低 lambda 改为
+`alignment_audit` 非阻断警告：模型的权衡仍完整记录，是否有效以 message plan 和输出为准，
+不再用人为阈值改写人物行为。实现语义变更后使用新协议和目录，从 Gate 6 重新验证。
