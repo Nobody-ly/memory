@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_11_consistent_turn_contract"
+PROTOCOL = "realtalk_task1_ours_v14_12_frozen_v9_semantic_contract"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -67,6 +67,13 @@ analogues provide strong, specific evidence that it mismatches this person's hab
 supporting moves merely because V9 used a single move. The main purpose of the new plan is to represent the
 natural structure of a turn, including multiple bubbles when supported, without turning it into a more ideal,
 warmer, more inquisitive, or more comprehensive response. Never copy or reconstruct the V9 generated text.
+
+The IMMUTABLE V9 ACTION CONTRACT is authoritative for primary_move, content_focus, and question_plan.
+Copy those three fields exactly into message_plan. Do not broaden, reinterpret, or replace their semantic
+content. You may choose question_target when the immutable question_plan permits a question. Your new work is
+limited to lambda/orientation, situation, relevant user facts, supporting structure, relationship register,
+reflection depth, length, tone, and question target. These choices may change how the fixed semantic action is
+realized but not what autobiographical event, preference, plan, or topic it claims.
 
 Keep speaker ownership exact. A workplace, activity, feeling, plan, preference, or experience stated by the
 partner remains the partner's fact. Never turn it into the target's self-disclosure. Do not introduce a
@@ -125,8 +132,11 @@ LATEST PARTNER TURN:
 
 CURRENT INTERACTION TRIGGER (deterministic hint): {current_trigger}
 
-FROZEN V9 SITUATION AND NEXT-ACTION PRIOR (behavioral anchor, not text to reproduce):
+FROZEN V9 SITUATION AND NEXT-ACTION PRIOR (behavioral context, not text to reproduce):
 {v9_decision_prior}
+
+IMMUTABLE V9 ACTION CONTRACT (copy its three authoritative fields exactly):
+{v9_action_contract}
 
 TARGET'S OBSERVED CA BEHAVIOR SUMMARY:
 {behavior_summary}
@@ -294,6 +304,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
             point["context_turns"], speaker_data["partner"], point["target_session"]
         )
         try:
+            action_contract = build_v9_action_contract(v9["next_action"])
             decision_envelope = _structured_call(
                 checkpoint=checkpoint,
                 backend=backend,
@@ -314,6 +325,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                         "situation": v9["situation"],
                         "next_action": v9["next_action"],
                     }),
+                    v9_action_contract=_json(action_contract),
                     behavior_summary=_json(behavior_summaries[point["speaker"]]),
                     behavior_examples=_json(analogues),
                     online_behavior=_json(
@@ -326,12 +338,15 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     ),
                 ),
                 schema=DECISION_SCHEMA,
-                normalizer=lambda value, domain=v9["user_domain"]: (
-                    _validate_v14_context(
-                        _validate_decision_profile_activation(
-                            normalize_v14_decision(value), domain
+                normalizer=lambda value, domain=v9["user_domain"], contract=action_contract: (
+                    _validate_v9_action_contract(
+                        _validate_v14_context(
+                            _validate_decision_profile_activation(
+                                normalize_v14_decision(value), domain
+                            ),
+                            has_history=bool(point["context_turns"]),
                         ),
-                        has_history=bool(point["context_turns"]),
+                        contract,
                     )
                 ),
                 max_tokens=1600,
@@ -394,6 +409,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     "situation": v9["situation"],
                     "next_action": v9["next_action"],
                 }),
+                "v9_action_contract": action_contract,
                 "ca_behavior_trigger": current_trigger,
                 "ca_behavior_examples": analogues,
                 "online_target_behavior": summarize_visible_target_behavior(
@@ -443,6 +459,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "training_or_finetuning": False,
         "frozen_v9_upstream": True,
         "v9_decision_used_as_conservative_prior": True,
+        "v9_semantic_action_contract_frozen": True,
         "v9_alignment_visible_to_v14": False,
         "v9_generated_text_visible_to_v14": False,
         "v9_content_direction_visible_to_actor": False,
@@ -705,6 +722,41 @@ def decision_plan_audit(plan: dict[str, Any]) -> dict[str, Any]:
             plan["question_plan"] == "none" and direction_mentions_question
         ),
     }
+
+
+def build_v9_action_contract(next_action: dict[str, Any]) -> dict[str, str]:
+    question_mode = str(next_action.get("question_mode", "none")).strip()
+    continuation = str(next_action.get("continuation_move", "none")).strip()
+    content_focus = str(next_action["content_direction"]).strip()
+    if question_mode == "follow-up":
+        question_plan = "follow-up"
+    elif continuation == "reciprocal-question":
+        question_plan = "reciprocal"
+    elif re.search(r"\breciprocal question\b", content_focus.casefold()):
+        question_plan = "reciprocal"
+    elif re.search(r"\b(?:ask|question about)\b", content_focus.casefold()):
+        question_plan = "follow-up"
+    else:
+        question_plan = "none"
+    return {
+        "primary_move": str(next_action["primary_move"]).strip(),
+        "content_focus": content_focus,
+        "question_plan": question_plan,
+    }
+
+
+def _validate_v9_action_contract(
+    decision: dict[str, Any], contract: dict[str, str]
+) -> dict[str, Any]:
+    plan = decision["message_plan"]
+    mismatches = {
+        key: {"expected": contract[key], "actual": plan[key]}
+        for key in ("primary_move", "content_focus", "question_plan")
+        if plan[key] != contract[key]
+    }
+    if mismatches:
+        raise ValueError(f"message_plan violates immutable V9 action contract: {mismatches}")
+    return decision
 
 
 def _actor_plan_view(plan: dict[str, Any]) -> dict[str, Any]:

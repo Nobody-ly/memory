@@ -223,11 +223,11 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
     if question_plan != "none" and not question_target:
         raise ValueError("question_target is required when question_plan permits a question")
     content_focus = _text(plan["content_focus"], "message_plan.content_focus")
-    if re.search(
+    if question_plan == "none" and re.search(
         r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
         content_focus.casefold(),
     ):
-        raise ValueError("content_focus must not contain a question instruction")
+        raise ValueError("questionless content_focus must not contain a question instruction")
 
     bubble_count = _integer(plan["bubble_count"], "message_plan.bubble_count")
     if not 1 <= bubble_count <= 6:

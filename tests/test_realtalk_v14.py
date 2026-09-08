@@ -16,10 +16,12 @@ from src.experiments.realtalk_v14 import (
     V14Config,
     _actor_plan_view,
     _information_question_count,
+    _validate_v9_action_contract,
     alignment_consistency_audit,
     actor_structure_audit,
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
+    build_v9_action_contract,
     classify_interaction_trigger,
     normalize_bubble_layout,
     retrieve_ca_behavior_examples,
@@ -302,6 +304,39 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertIn("question_mode=follow-up", lower)
         self.assertIn("question_plan cannot be none", lower)
 
+    def test_v9_action_contract_maps_question_controls(self):
+        contract = build_v9_action_contract({
+            "primary_move": "answer",
+            "content_direction": "weekend plan",
+            "question_mode": "none",
+            "continuation_move": "reciprocal-question",
+        })
+        self.assertEqual(contract, {
+            "primary_move": "answer",
+            "content_focus": "weekend plan",
+            "question_plan": "reciprocal",
+        })
+
+        free_text_contract = build_v9_action_contract({
+            "primary_move": "acknowledge",
+            "content_direction": "acknowledge the plan and ask about timing",
+            "question_mode": "none",
+            "continuation_move": "none",
+        })
+        self.assertEqual(free_text_contract["question_plan"], "follow-up")
+
+    def test_v9_action_contract_rejects_semantic_drift(self):
+        decision = normalize_v14_decision(_decision())
+        contract = {
+            "primary_move": "answer",
+            "content_focus": decision["message_plan"]["content_focus"],
+            "question_plan": "reciprocal",
+        }
+        self.assertIs(_validate_v9_action_contract(decision, contract), decision)
+        decision["message_plan"]["content_focus"] = "invent a current office update"
+        with self.assertRaisesRegex(ValueError, "immutable V9 action contract"):
+            _validate_v9_action_contract(decision, contract)
+
     def test_actor_structure_audit_reports_without_rewriting(self):
         audit = actor_structure_audit("First bubble\nSecond bubble?", _decision()["message_plan"])
         self.assertTrue(audit["bubble_count_match"])
@@ -373,8 +408,9 @@ class RealTalkV14Tests(unittest.TestCase):
                     "alignment": _decision()["alignment"],
                     "next_action": {
                         "primary_move": "answer",
+                        "content_direction": "answer the current conversational slot",
                         "question_mode": "none",
-                        "continuation_move": "none",
+                        "continuation_move": "reciprocal-question",
                     },
                 })
         with tempfile.TemporaryDirectory() as directory:

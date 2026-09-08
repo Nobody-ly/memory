@@ -284,3 +284,15 @@ V14.10 的 5 条成功结果均满足气泡和问题权限，但 Emi 连续三�
 增加字段映射与自洽检查：V9 `continuation_move=reciprocal-question` 对应 `reciprocal`，V9
 `question_mode=follow-up` 对应 `follow-up`；只有可见历史或 Ca 行为证据提供具体反证时才能放弃，
 并且理由不能继续描述要问。该修正不读取答案、不修改策略结果，只消除理由与 Schema 的矛盾。
+
+V14.11 完成 6/6、零 unresolved，气泡和问题权限均 6/6 一致。但人工抽检发现 Muhhamed 的
+新 `content_focus` 把伙伴办公室经历扩写成目标人物“自己的办公室也冷”，违反当前事实归属；
+因此未进入 Judge。V14.12 进一步冻结 V9 的语义动作合同：
+
+- `primary_move` 固定为 V9；
+- `content_focus` 逐字固定为 V9 `content_direction`；
+- `question_plan` 由 V9 的 `question_mode`/`continuation_move` 确定性映射。
+
+新 Decision 只能决定 situation、User Domain 激活、动态 lambda、辅助结构、关系语气、反思、
+长度、气泡和问题槽位，不能再创造新的当前自传事实或更换话题。校验器要求三个冻结字段逐字
+一致，失败只触发既有 Schema 修复重试，不静默重写输出。
