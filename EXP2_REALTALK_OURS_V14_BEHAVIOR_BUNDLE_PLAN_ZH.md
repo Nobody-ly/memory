@@ -313,3 +313,8 @@ Self Domain、历史与计划后，把多个决策素材都当成正文素材。
 但 Actor 只接收完整真实历史、行为化 Self Domain 和唯一 Turn Plan；User Domain、Ca 类比、
 Situation、lambda 均只在 Decision 中生效，不再二次注入。`content_focus` 明确作为内容上限而非
 逐项展开清单。该改动是职责分离，不禁用任何上游 Ours 模块。
+
+V14.14 Gate 18 完成 18/18、零 unresolved，但 Reflectiveness/Grounding/Empathy AD 分别为
+0.60/0.55/1.35，均差于 V14.12 的 0.65/0.70/1.15；Emotion 也由 0.65 降至 0.45。
+因此按渐进门槛停止，不进入 Gate 30。当前保留 V14.12 为最佳诊断候选，完整对比和路径见
+`EXP2_REALTALK_V9_V14_ITERATION_REPORT_ZH.md`。
