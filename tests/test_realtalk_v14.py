@@ -367,8 +367,9 @@ class RealTalkV14Tests(unittest.TestCase):
             self.assertTrue(all("target_turn" not in call["user"] for call in actor_calls))
             self.assertTrue(all("identity_context" not in call["user"] for call in actor_calls))
             decision_calls = [call for call in backend.calls if call["schema"] is not None]
-            self.assertTrue(all("FROZEN V9 DECISION PRIOR" in call["user"] for call in decision_calls))
+            self.assertTrue(all("FROZEN V9 SITUATION AND NEXT-ACTION PRIOR" in call["user"] for call in decision_calls))
             self.assertTrue(all("V9 frozen output" not in call["user"] for call in decision_calls))
+            self.assertTrue(all('"alignment"' not in call["user"].split("FROZEN V9 SITUATION", 1)[1].split("TARGET'S OBSERVED CA", 1)[0] for call in decision_calls))
 
 
 if __name__ == "__main__":

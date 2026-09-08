@@ -241,3 +241,9 @@ V14.5 完成 6/6、零 unresolved、气泡结构 6/6，但配对指标仍低于�
 - V9 generated message 永不进入 V14 Prompt，避免成为文本重写或自蒸馏。
 
 Prompt 变更后，V14.6 使用新协议和新目录，从 Gate 6 开始。
+
+V14.6 把 V9 Alignment 也放入保守先验，结果 2 条出现“partner-adaptive orientation + 低于
+0.55 的旧 lambda”并耗尽重试；其余 4 条全部 self-led，lambda 均值 0.025。V14.7 因此只
+锚定 V9 Situation 与 Next Action，不向新 Decision 披露 V9 orientation/lambda。这样保留 V9
+较稳的行为选择，同时让新 lambda 根据当前历史、Self/User Domain 与 Ca 行为证据独立计算。
+Prompt 变更后使用新协议和目录，从 Gate 6 开始。

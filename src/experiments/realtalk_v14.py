@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_6_v9_anchored_behavior_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_7_v9_action_anchored_behavior_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -118,7 +118,7 @@ LATEST PARTNER TURN:
 
 CURRENT INTERACTION TRIGGER (deterministic hint): {current_trigger}
 
-FROZEN V9 DECISION PRIOR (behavioral anchor, not text to reproduce):
+FROZEN V9 SITUATION AND NEXT-ACTION PRIOR (behavioral anchor, not text to reproduce):
 {v9_decision_prior}
 
 TARGET'S OBSERVED CA BEHAVIOR SUMMARY:
@@ -302,7 +302,6 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     current_trigger=current_trigger,
                     v9_decision_prior=_json({
                         "situation": v9["situation"],
-                        "alignment": v9["alignment"],
                         "next_action": v9["next_action"],
                     }),
                     behavior_summary=_json(behavior_summaries[point["speaker"]]),
@@ -379,7 +378,6 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 "v9_generated_message": v9["generated_message"],
                 "v9_decision_prior_hash": stable_hash({
                     "situation": v9["situation"],
-                    "alignment": v9["alignment"],
                     "next_action": v9["next_action"],
                 }),
                 "ca_behavior_trigger": current_trigger,
@@ -428,6 +426,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "training_or_finetuning": False,
         "frozen_v9_upstream": True,
         "v9_decision_used_as_conservative_prior": True,
+        "v9_alignment_visible_to_v14": False,
         "v9_generated_text_visible_to_v14": False,
         "regenerated_stages": ["decision", "actor"],
         "frozen_stages": ["self_domain", "user_domain"],
