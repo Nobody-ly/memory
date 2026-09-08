@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_12_frozen_v9_semantic_contract"
+PROTOCOL = "realtalk_task1_ours_v14_13_concise_actor_contract"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -181,8 +181,9 @@ PRIVATE TURN PLAN (structured fields are authoritative):
 
 Write one natural conversational turn as {speaker}. Complete the primary move and only the compatible
 supporting moves in the plan. Match the planned relationship register, reflection depth, length band, and
-question plan. Ask no information-seeking question when question_plan is none; when it permits a question,
-ask exactly one. Produce exactly bubble_count non-empty chat
+question plan. When question_plan is none, use no interrogative sentence and no question mark, including a
+rhetorical question. When it permits a question, ask exactly one question and use one question mark. Produce
+exactly bubble_count non-empty chat
 bubbles, separated with newline characters and without numbers or labels. Use content_focus to decide what
 the turn is about and question_target only when question_plan permits it. Prefer the shortest natural
 wording that completes the content focus. A typical chat turn is not a request for a comprehensive answer.
@@ -190,9 +191,14 @@ Keep short plans compact; do not turn them into polished explanations merely to 
 analogue metadata describes old turn
 shape only and contains no current facts. A fact stated by the partner remains the partner's fact and must
 not be rewritten as your own experience, workplace, activity, feeling, plan, or preference.
-When reflection_depth is none, state any answer, preference, plan, or status directly; do not frame it as
-"I think", "I feel", "I guess", a reason, self-analysis, or interpretation. Surface permits one simple stance
-or feeling without an explanation. Brief permits one concise reflective explanation. Do not add praise,
+Treat length_band as a real chat budget: short is usually one compact thought, typical is one or two concise
+thoughts, and extended is only as long as needed for a genuinely multipart content focus. Multiple bubbles
+split a turn's rhythm; they do not grant extra content.
+When reflection_depth is none, state any answer, preference, plan, or status directly and stop; do not add a
+reason, lesson, interpretation, emotional evaluation, or commentary about why it matters. Avoid framing such
+turns as "I think", "I feel", "I guess", "I love/hate", "I'm glad", or "it makes" unless that exact stance is
+the frozen content focus. Surface permits one simple stance or feeling without an explanation. Brief permits
+one concise reflective explanation. Do not add praise,
 validation, concern, or an evaluative acknowledgement just to make an ordinary turn sound warmer or more
 complete. Warm or supportive language must come from the current situation and plan, not generic polish.
 Do not mention the plan, domains, examples, or any internal reasoning."""
@@ -385,6 +391,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 raw_audit=raw_audit,
                 enable_thinking=False,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
+                temperature=0.3,
             )
             raw_generated = generation_envelope["data"]
             generated, layout_audit = normalize_bubble_layout(
@@ -484,7 +491,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "schema_hashes": {"decision": stable_hash(DECISION_SCHEMA)},
         "decoding": {
             "decision": {"temperature": 0.2, "top_p": 0.9, "max_tokens": 1600},
-            "actor": {"temperature": 0.6, "top_p": 0.9, "max_tokens": 300},
+            "actor": {"temperature": 0.3, "top_p": 0.9, "max_tokens": 300},
         },
         "preflight": preflight,
         "base_url_host": _safe_host(getattr(backend, "base_url", "injected-test-backend")),

@@ -297,6 +297,8 @@ class RealTalkV14Tests(unittest.TestCase):
         self.assertNotIn("grounding", lower)
         self.assertNotIn("five-layer user domain", lower)
         self.assertIn("relevant partner facts", lower)
+        self.assertIn("use no interrogative sentence and no question mark", lower)
+        self.assertIn("multiple bubbles", lower)
 
     def test_decision_prompt_maps_v9_question_controls_explicitly(self):
         lower = DECISION_SYSTEM_PROMPT.casefold()

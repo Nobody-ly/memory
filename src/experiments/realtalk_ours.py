@@ -924,6 +924,7 @@ def _text_call(
     raw_audit: Path,
     enable_thinking: bool,
     hard_timeout_seconds: int = 0,
+    temperature: float = 0.6,
 ) -> dict[str, Any]:
     logical_attempt = {"value": 0}
 
@@ -933,7 +934,7 @@ def _text_call(
             lambda: backend.chat(
                 system_prompt,
                 user_prompt,
-                temperature=0.6,
+                temperature=temperature,
                 top_p=0.9,
                 max_tokens=300,
                 enable_thinking=enable_thinking,

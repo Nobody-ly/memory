@@ -296,3 +296,13 @@ V14.11 完成 6/6、零 unresolved，气泡和问题权限均 6/6 一致。但�
 新 Decision 只能决定 situation、User Domain 激活、动态 lambda、辅助结构、关系语气、反思、
 长度、气泡和问题槽位，不能再创造新的当前自传事实或更换话题。校验器要求三个冻结字段逐字
 一致，失败只触发既有 Schema 修复重试，不静默重写输出。
+
+V14.12 的 Gate 18 完成 18/18、零 unresolved，Grounding 从同 ID V9 的 0.45 提升至 0.70，
+Emotion 从 0.55 提升至 0.65，Empathy AD 从 1.50 降至 1.15；但 Reflectiveness 从 0.75
+降至 0.65，ROUGE 从 0.149 降至 0.134。反思混淆为：参考 5 条反思，候选被判 10 条，主要
+问题是普通动作被 Actor 扩写成感受、评价和理由，而不是 Decision 缺少反思。
+
+V14.13 因而只修改 Actor：温度从 0.6 降为 0.3；`reflection_depth=none` 时完成冻结内容后
+停止，不附加理由、解释、情绪评价或意义总结；问题禁用时禁止任何疑问句和问号；长度档位是
+真实聊天预算，多气泡只改变节奏，不增加内容。V14.12 的冻结语义、Decision、检索、lambda
+和上游 Domain 设计均保持不变。Prompt 改变后从 Gate 6 重新开始。
