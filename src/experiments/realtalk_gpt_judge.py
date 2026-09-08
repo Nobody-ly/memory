@@ -204,7 +204,13 @@ def _speaker_id(speaker: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", speaker.casefold()).strip("_")
 
 
-def run(predictions: Path, dataset_dir: Path, output_dir: Path, model: str) -> dict[str, Any]:
+def run(
+    predictions: Path,
+    dataset_dir: Path,
+    output_dir: Path,
+    model: str,
+    reference_checkpoint: Path | None = None,
+) -> dict[str, Any]:
     api_key = os.environ["REALTALK_JUDGE_API_KEY"]
     base_url = os.environ["REALTALK_JUDGE_BASE_URL"]
     rows = [json.loads(line) for line in predictions.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -212,6 +218,21 @@ def run(predictions: Path, dataset_dir: Path, output_dir: Path, model: str) -> d
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / "checkpoint.json"
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8")) if checkpoint_path.exists() else {"judgments": {}, "errors": {}}
+    reused_reference_keys: list[str] = []
+    if reference_checkpoint is not None:
+        source_checkpoint = json.loads(reference_checkpoint.read_text(encoding="utf-8"))
+        source_judgments = source_checkpoint.get("judgments", {})
+        for row in rows:
+            for metric in ("reflectiveness", "grounding", "empathy"):
+                key = f"{row['result_id']}:reference:{metric}"
+                if key not in source_judgments:
+                    raise ValueError(f"reference checkpoint is missing {key}")
+                if key not in checkpoint["judgments"]:
+                    checkpoint["judgments"][key] = source_judgments[key]
+                reused_reference_keys.append(key)
+        checkpoint_path.write_text(
+            json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     raw_path = output_dir / "raw_responses.jsonl"
 
     for row in rows:
@@ -298,6 +319,10 @@ def run(predictions: Path, dataset_dir: Path, output_dir: Path, model: str) -> d
         "judgments_expected": len(rows) * 6,
         "judgments_complete": len(checkpoint["judgments"]),
         "unresolved_errors": len(checkpoint["errors"]),
+        "reference_judgments_reused": len(set(reused_reference_keys)),
+        "reference_checkpoint": (
+            str(reference_checkpoint.resolve()) if reference_checkpoint else None
+        ),
         "aggregation_for_table2": "speaker_macro_mean_and_population_std",
         "by_speaker": by_speaker,
         "speaker_macro": speaker_macro,
@@ -322,8 +347,15 @@ def main() -> None:
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model", default="gpt-4o-mini")
+    parser.add_argument("--reference-checkpoint", type=Path)
     args = parser.parse_args()
-    print(json.dumps(run(args.predictions, args.dataset_dir, args.output_dir, args.model), ensure_ascii=False, indent=2))
+    print(json.dumps(run(
+        args.predictions,
+        args.dataset_dir,
+        args.output_dir,
+        args.model,
+        reference_checkpoint=args.reference_checkpoint,
+    ), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

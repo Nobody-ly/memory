@@ -142,6 +142,10 @@ Actor 只输出目标人物消息。计划为多气泡时，用换行分隔，�
 - 原始响应、重试、token、checkpoint 和 unresolved；
 - V9/V14 同 ID 的本地指标、Appendix C Judge 和人工抽检报告。
 
+配对 Judge 复用冻结 V9 checkpoint 中同一 `result_id` 的 Ground Truth 三项标签，仅对 V14
+候选调用 Judge。复用不改变 Appendix C Prompt、模型或解析规则，可避免重复判断参考答案带来
+随机波动，并将每条新增 Judge 调用从 6 次降为 3 次。
+
 ## 9. 明确不改内容
 
 - 不改 Table 8 Ca/Cb 映射和前三个连续 Session。
