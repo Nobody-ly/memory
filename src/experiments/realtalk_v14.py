@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_13_concise_actor_contract"
+PROTOCOL = "realtalk_task1_ours_v14_14_minimal_actor_context"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -167,15 +167,6 @@ ACTOR_USER_TEMPLATE = """REAL CONVERSATION HISTORY BEFORE YOUR NEXT TURN:
 PRIVATE SELF DOMAIN:
 {self_domain}
 
-RELEVANT PARTNER FACTS FOR THIS TURN:
-{relevant_user_domain}
-
-PAST CA BEHAVIOR ANALOGUES:
-{behavior_examples}
-
-PRIVATE CURRENT SITUATION:
-{situation}
-
 PRIVATE TURN PLAN (structured fields are authoritative):
 {message_plan}
 
@@ -185,12 +176,11 @@ question plan. When question_plan is none, use no interrogative sentence and no 
 rhetorical question. When it permits a question, ask exactly one question and use one question mark. Produce
 exactly bubble_count non-empty chat
 bubbles, separated with newline characters and without numbers or labels. Use content_focus to decide what
-the turn is about and question_target only when question_plan permits it. Prefer the shortest natural
-wording that completes the content focus. A typical chat turn is not a request for a comprehensive answer.
-Keep short plans compact; do not turn them into polished explanations merely to fill several bubbles. Ca
-analogue metadata describes old turn
-shape only and contains no current facts. A fact stated by the partner remains the partner's fact and must
-not be rewritten as your own experience, workplace, activity, feeling, plan, or preference.
+the turn is about and question_target only when question_plan permits it. content_focus is a ceiling, not a
+checklist to elaborate: use the shortest natural wording that completes it. A typical chat turn is not a
+request for a comprehensive answer. Keep short plans compact; do not turn them into polished explanations
+merely to fill several bubbles. A fact stated by the partner remains the partner's fact and must not be
+rewritten as your own experience, workplace, activity, feeling, plan, or preference.
 Treat length_band as a real chat budget: short is usually one compact thought, typical is one or two concise
 thoughts, and extended is only as long as needed for a genuinely multipart content focus. Multiple bubbles
 split a turn's rhythm; they do not grant extra content.
@@ -362,16 +352,6 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 hard_timeout_seconds=config.model_call_timeout_seconds,
             )
             decision = decision_envelope["data"]
-            actor_examples = [
-                {
-                    "trigger": item["trigger"],
-                    "bubble_count": item["bubble_count"],
-                    "character_count": item["character_count"],
-                    "contains_question": item["contains_question"],
-                    "contains_reflective_marker": item["contains_reflective_marker"],
-                }
-                for item in analogues
-            ]
             generation_envelope = _text_call(
                 checkpoint=checkpoint,
                 backend=backend,
@@ -381,9 +361,6 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     speaker=point["speaker"],
                     history=_turns_with_session_boundaries(point["context_turns"]),
                     self_domain=_json(_v14_actor_self_domain(self_domain)),
-                    relevant_user_domain=_json(decision["relevant_user_domain"]),
-                    behavior_examples=_json(actor_examples),
-                    situation=_json(decision["situation"]),
                     message_plan=_json(_actor_plan_view(decision["message_plan"])),
                 ),
                 speaker=point["speaker"],
@@ -472,6 +449,10 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "v9_content_direction_visible_to_actor": False,
         "decision_content_focus_visible_to_actor": True,
         "single_authoritative_question_contract": True,
+        "actor_receives_user_domain": False,
+        "actor_receives_ca_analogues": False,
+        "actor_receives_situation": False,
+        "actor_receives_alignment": False,
         "deterministic_bubble_layout_normalization": True,
         "regenerated_stages": ["decision", "actor"],
         "frozen_stages": ["self_domain", "user_domain"],

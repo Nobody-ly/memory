@@ -306,3 +306,10 @@ V14.13 因而只修改 Actor：温度从 0.6 降为 0.3；`reflection_depth=none
 停止，不附加理由、解释、情绪评价或意义总结；问题禁用时禁止任何疑问句和问号；长度档位是
 真实聊天预算，多气泡只改变节奏，不增加内容。V14.12 的冻结语义、Decision、检索、lambda
 和上游 Domain 设计均保持不变。Prompt 改变后从 Gate 6 重新开始。
+
+V14.13 Gate 6 虽完成 6/6 且结构一致，但低温未降低长度：Emi、Kevin 等普通动作仍被扩写。
+说明主要问题不是采样随机性，而是 Actor 同时再次读取 User Domain、Ca 元数据、Situation、
+Self Domain、历史与计划后，把多个决策素材都当成正文素材。V14.14 保留 Decision 的全部输入，
+但 Actor 只接收完整真实历史、行为化 Self Domain 和唯一 Turn Plan；User Domain、Ca 类比、
+Situation、lambda 均只在 Decision 中生效，不再二次注入。`content_focus` 明确作为内容上限而非
+逐项展开清单。该改动是职责分离，不禁用任何上游 Ours 模块。
