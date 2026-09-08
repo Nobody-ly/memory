@@ -16,6 +16,7 @@ from src.experiments.realtalk_v14 import (
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
     classify_interaction_trigger,
+    decision_plan_audit,
     retrieve_ca_behavior_examples,
     run_v14,
     summarize_behavior_bank,
@@ -245,19 +246,21 @@ class RealTalkV14Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at most one question"):
             normalize_v14_decision(invalid)
 
-    def test_decision_rejects_question_instruction_when_plan_forbids_it(self):
+    def test_structured_question_plan_remains_authoritative_over_free_text(self):
         invalid = _decision()
         invalid["message_plan"].update({
             "supporting_moves": ["acknowledge"],
             "question_plan": "none",
             "content_direction": "Acknowledge the point and end with a question.",
         })
-        with self.assertRaisesRegex(ValueError, "requests a question"):
-            _validate_v14_context(
-                normalize_v14_decision(invalid),
-                trigger="after-partner-statement",
-                has_history=True,
-            )
+        normalized = _validate_v14_context(
+            normalize_v14_decision(invalid),
+            trigger="after-partner-statement",
+            has_history=True,
+        )
+        audit = decision_plan_audit(normalized["message_plan"])
+        self.assertTrue(audit["direction_question_conflict"])
+        self.assertTrue(audit["question_plan_is_authoritative"])
 
     def test_actor_prompt_has_no_metrics_lambda_or_full_user_domain(self):
         lower = ACTOR_USER_TEMPLATE.casefold()

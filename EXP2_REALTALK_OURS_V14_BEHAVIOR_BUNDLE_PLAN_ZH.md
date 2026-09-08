@@ -171,3 +171,13 @@ V14.1 采用通用协议修正，不根据 Ground Truth 改答案：
 
 Prompt 已变更，因此协议升级为 `realtalk_task1_ours_v14_1_ca_behavior_turn_bundle`，使用
 新输出目录并从 Gate 6 重新开始。
+
+V14.1 实际完成 5/6，成功样本中气泡数与问题权限均为 5/5 一致，lambda 覆盖三种方向。
+第 6 条在三次 Decision 中均出现“结构化 question_plan 为 none、自由文本方向仍提到问句”的
+冲突，被过严的 normalizer 判为 unresolved。V14.2 不替模型改策略，也不重写 Actor：
+
+- 结构化 `question_plan` 成为 Actor 的唯一权威；
+- 自由文本冲突记录为 `decision_plan_audit` 警告，不再阻断样本；
+- Actor 仍必须按 question_plan 执行，最终是否越权由 `actor_structure_audit` 检查。
+
+因此 V14.2 使用新协议和新目录，再次从 Gate 6 开始。

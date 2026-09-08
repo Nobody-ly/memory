@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_1_ca_behavior_turn_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_2_ca_behavior_turn_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -358,6 +358,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 "relevant_user_domain": decision["relevant_user_domain"],
                 "alignment": decision["alignment"],
                 "message_plan": decision["message_plan"],
+                "decision_plan_audit": decision_plan_audit(decision["message_plan"]),
                 "actor_structure_audit": actor_structure_audit(
                     generated, decision["message_plan"]
                 ),
@@ -599,6 +600,20 @@ def actor_structure_audit(message: str, plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def decision_plan_audit(plan: dict[str, Any]) -> dict[str, Any]:
+    direction_mentions_question = bool(re.search(
+        r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
+        plan["content_direction"].casefold(),
+    ))
+    return {
+        "question_plan_is_authoritative": True,
+        "direction_mentions_question": direction_mentions_question,
+        "direction_question_conflict": (
+            plan["question_plan"] == "none" and direction_mentions_question
+        ),
+    }
+
+
 def aggregate_v14_diagnostics(results: list[dict[str, Any]]) -> dict[str, Any]:
     if not results:
         return {"records": 0}
@@ -621,6 +636,9 @@ def aggregate_v14_diagnostics(results: list[dict[str, Any]]) -> dict[str, Any]:
         "actor_question_permission_match_rate": round(statistics.mean(
             row["actor_structure_audit"]["question_permission_match"] for row in results
         ), 6),
+        "decision_direction_question_conflicts": sum(
+            row["decision_plan_audit"]["direction_question_conflict"] for row in results
+        ),
         "candidate_multiline_rate": round(observed_multiline / len(results), 6),
         "ground_truth_multiline_rate": round(gt_multiline / len(results), 6),
     }
@@ -720,12 +738,6 @@ def _validate_v14_context(
             raise ValueError(
                 "direct partner question/support trigger requires a genuinely partner-shaped plan"
             )
-    direction = plan["content_direction"].casefold()
-    if plan["question_plan"] == "none" and re.search(
-        r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
-        direction,
-    ):
-        raise ValueError("content_direction requests a question while question_plan is none")
     return value
 
 
