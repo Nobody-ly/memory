@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_8_v9_action_anchored_behavior_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_9_v9_content_anchored_behavior_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -74,8 +74,8 @@ concrete autobiographical topic solely because it appears in a Ca example or the
 history must make that content current. The content_direction describes what this turn should contribute,
 not a draft and not a list of old persona attributes to demonstrate.
 
-Plan one natural turn. A turn may contain several consecutive chat bubbles and several compatible social
-moves. Select one primary move and up to two supporting moves in their intended order. question_plan is the
+Plan one natural turn. A turn may contain several consecutive chat bubbles and compatible social moves.
+Select one primary move and at most one supporting move. question_plan is the
 only place that controls whether the turn asks a question; do not encode a question as a supporting move.
 Do not force a
 question, reflection, acknowledgement, or self-disclosure; include each only when the visible interaction,
@@ -83,8 +83,8 @@ the person's observed behavior, or close Ca analogues support it. Conversely, do
 multi-part response into a mechanical single action when the person regularly combines moves.
 Multiple bubbles do not imply multiple social moves: several bubbles may simply realize one answer, update,
 or reaction in the target's habitual rhythm. Most ordinary turns should have no supporting move. Add one only
-when it contributes content that the primary move cannot naturally carry; add two only with unusually strong
-evidence. In particular, do not prepend an acknowledgement merely to make an answer or self-disclosure sound
+when it contributes content that the primary move cannot naturally carry. In particular, do not prepend an
+acknowledgement merely to make an answer or self-disclosure sound
 polite, engaged, or complete.
 The free-text content_direction must agree with question_plan: when question_plan is none, it must not ask,
 inquire, end with a question, or tell the Actor to find out another detail.
@@ -159,6 +159,9 @@ PAST CA BEHAVIOR ANALOGUES:
 PRIVATE CURRENT SITUATION:
 {situation}
 
+FROZEN V9 CONTENT FOCUS (what to talk about, not wording to copy):
+{content_focus}
+
 PRIVATE TURN PLAN (structured fields are authoritative):
 {message_plan}
 
@@ -166,8 +169,11 @@ Write one natural conversational turn as {speaker}. Complete the primary move an
 supporting moves in the plan. Match the planned relationship register, reflection depth, length band, and
 question plan. Ask no information-seeking question when question_plan is none; when it permits a question,
 ask exactly one. Produce exactly bubble_count non-empty chat
-bubbles, separated with newline characters and without numbers or labels. Keep short plans compact; do not
-turn them into polished explanations merely to fill several bubbles. Ca analogue metadata describes old turn
+bubbles, separated with newline characters and without numbers or labels. Use the frozen content focus to
+decide what the turn is about; the new plan controls how that content is expressed. Prefer the shortest natural
+wording that completes the content focus. A typical chat turn is not a request for a comprehensive answer.
+Keep short plans compact; do not turn them into polished explanations merely to fill several bubbles. Ca
+analogue metadata describes old turn
 shape only and contains no current facts. A fact stated by the partner remains the partner's fact and must
 not be rewritten as your own experience, workplace, activity, feeling, plan, or preference.
 When reflection_depth is none, state any answer, preference, plan, or status directly; do not frame it as
@@ -353,6 +359,7 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     relevant_user_domain=_json(decision["relevant_user_domain"]),
                     behavior_examples=_json(actor_examples),
                     situation=_json(decision["situation"]),
+                    content_focus=_json(_v9_content_focus(v9["next_action"])),
                     message_plan=_json(_actor_plan_view(decision["message_plan"])),
                 ),
                 speaker=point["speaker"],
@@ -361,7 +368,10 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                 enable_thinking=False,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
             )
-            generated = generation_envelope["data"]
+            raw_generated = generation_envelope["data"]
+            generated, layout_audit = normalize_bubble_layout(
+                raw_generated, decision["message_plan"]["bubble_count"]
+            )
             result = {
                 **{
                     key: v9[key] for key in (
@@ -374,6 +384,8 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
                     )
                 },
                 "generated_message": generated,
+                "raw_generated_message": raw_generated,
+                "bubble_layout_normalization": layout_audit,
                 "v9_generated_message": v9["generated_message"],
                 "v9_decision_prior_hash": stable_hash({
                     "situation": v9["situation"],
@@ -430,6 +442,8 @@ def run_v14(config: V14Config, backend: ChatBackend | None = None) -> dict[str, 
         "v9_decision_used_as_conservative_prior": True,
         "v9_alignment_visible_to_v14": False,
         "v9_generated_text_visible_to_v14": False,
+        "v9_content_direction_visible_to_actor": True,
+        "deterministic_bubble_layout_normalization": True,
         "regenerated_stages": ["decision", "actor"],
         "frozen_stages": ["self_domain", "user_domain"],
         "omega_enabled": False,
@@ -637,6 +651,43 @@ def actor_structure_audit(message: str, plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def normalize_bubble_layout(message: str, target_count: int) -> tuple[str, dict[str, Any]]:
+    """Apply newline-only layout normalization when sentence boundaries permit it."""
+    original = message.strip()
+    existing = [line.strip() for line in original.splitlines() if line.strip()]
+    audit = {
+        "target_count": target_count,
+        "before_count": len(existing),
+        "after_count": len(existing),
+        "applied": False,
+        "content_tokens_preserved": True,
+    }
+    if target_count <= 1 or len(existing) == target_count:
+        return original, audit
+    if len(existing) > 1:
+        return original, audit
+
+    chunks = [part.strip() for part in re.split(r"(?<=[.!?])\s+", original) if part.strip()]
+    if len(chunks) < target_count:
+        return original, audit
+
+    groups: list[str] = []
+    start = 0
+    for index in range(target_count):
+        remaining_chunks = len(chunks) - start
+        remaining_groups = target_count - index
+        take = (remaining_chunks + remaining_groups - 1) // remaining_groups
+        groups.append(" ".join(chunks[start:start + take]))
+        start += take
+    normalized = "\n".join(groups)
+    audit.update({
+        "after_count": len(groups),
+        "applied": True,
+        "content_tokens_preserved": original.split() == normalized.split(),
+    })
+    return normalized, audit
+
+
 def decision_plan_audit(plan: dict[str, Any]) -> dict[str, Any]:
     direction_mentions_question = bool(re.search(
         r"\b(?:ask|inquire|find out|end with (?:a )?question|return question)\b",
@@ -663,6 +714,12 @@ def _actor_plan_view(plan: dict[str, Any]) -> dict[str, Any]:
             "length_band",
             "tone",
         )
+    }
+
+
+def _v9_content_focus(next_action: dict[str, Any]) -> dict[str, str]:
+    return {
+        "content_direction": str(next_action.get("content_direction", "")).strip(),
     }
 
 

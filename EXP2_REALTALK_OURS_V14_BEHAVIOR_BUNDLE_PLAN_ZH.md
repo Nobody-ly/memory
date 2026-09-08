@@ -253,3 +253,16 @@ V14.7 在扩至 Gate 18 时完成 17/18；缺失样本连续三次选择 self-le
 Persona Simulation。V14.8 将 orientation/lambda 的经验区间与 partner-trigger 低 lambda 改为
 `alignment_audit` 非阻断警告：模型的权衡仍完整记录，是否有效以 message plan 和输出为准，
 不再用人为阈值改写人物行为。实现语义变更后使用新协议和目录，从 Gate 6 重新验证。
+
+V14.8 完成 Gate 6 的 6/6、零 unresolved，问题权限 6/6 一致，但计划气泡数只有 2/6 被
+Actor 执行。审计进一步发现 Actor View 未收到任何内容方向：Decision 虽然产生
+`content_direction`，该字段却在投影时被删去，Actor 只能根据历史重新猜一次内容，造成
+内容漂移和过度展开。V14.9 因此：
+
+- 向 Actor 披露冻结 V9 `next_action.content_direction`，仅作为“谈什么”的内容锚点；
+- 新 Decision 继续负责“怎么表达”的气泡、关系语气、反思、问题权限与动态 lambda；
+- 辅助动作最多一个，避免把普通 turn 扩展成全面、温暖的助手式回答；
+- 对可在句界切分的单行输出仅替换句间空白为换行，不增加、删除或重写词语；不能无损切分时
+  保留原文并记录审计，不强行破坏句子。
+
+V14.9 使用新协议和新目录，从 Gate 6 重新验证；只有结构与配对评价均无明显退化才扩至 18 条。

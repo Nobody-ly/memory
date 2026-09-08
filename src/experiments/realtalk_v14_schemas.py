@@ -116,7 +116,7 @@ DECISION_SCHEMA = {
                     },
                     "supporting_moves": {
                         "type": "array",
-                        "maxItems": 2,
+                        "maxItems": 1,
                         "items": {"type": "string", "enum": list(SUPPORTING_MOVES)},
                     },
                     "bubble_count": {"type": "integer", "minimum": 1, "maximum": 6},
@@ -198,8 +198,8 @@ def normalize_v14_decision(value: Any) -> dict[str, Any]:
 
     primary_move = _enum(plan["primary_move"], PRIMARY_MOVES, "message_plan.primary_move")
     supporting = plan["supporting_moves"]
-    if not isinstance(supporting, list) or len(supporting) > 2:
-        raise ValueError("message_plan.supporting_moves must contain at most two moves")
+    if not isinstance(supporting, list) or len(supporting) > 1:
+        raise ValueError("message_plan.supporting_moves must contain at most one move")
     supporting_moves = [
         _enum(item, SUPPORTING_MOVES, f"message_plan.supporting_moves[{index}]")
         for index, item in enumerate(supporting)

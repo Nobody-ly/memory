@@ -12,19 +12,21 @@ from src.experiments.realtalk_ours_schemas import empty_user_domain
 from src.experiments.realtalk_v14 import (
     ACTOR_USER_TEMPLATE,
     DECISION_USER_TEMPLATE,
-    actor_structure_audit,
-    alignment_consistency_audit,
+    V14Config,
     _actor_plan_view,
+    _information_question_count,
+    _v9_content_focus,
+    _validate_v14_context,
+    alignment_consistency_audit,
+    actor_structure_audit,
     build_ca_behavior_bank,
     build_progressive_gate_manifest,
     classify_interaction_trigger,
     decision_plan_audit,
-    _information_question_count,
+    normalize_bubble_layout,
     retrieve_ca_behavior_examples,
     run_v14,
     summarize_behavior_bank,
-    V14Config,
-    _validate_v14_context,
 )
 from src.experiments.exp1_protocol import stable_hash
 from src.experiments.realtalk_v14_schemas import normalize_v14_decision
@@ -300,6 +302,28 @@ class RealTalkV14Tests(unittest.TestCase):
         audit = actor_structure_audit("First bubble\nSecond bubble?", _decision()["message_plan"])
         self.assertTrue(audit["bubble_count_match"])
         self.assertTrue(audit["question_permission_match"])
+
+    def test_bubble_layout_normalization_changes_only_sentence_whitespace(self):
+        original = "First thought. Second thought. Third thought."
+        normalized, audit = normalize_bubble_layout(original, 2)
+        self.assertEqual(len(normalized.splitlines()), 2)
+        self.assertEqual(original.split(), normalized.split())
+        self.assertTrue(audit["applied"])
+        self.assertTrue(audit["content_tokens_preserved"])
+
+    def test_bubble_layout_normalization_does_not_force_unsafe_split(self):
+        original = "One short sentence."
+        normalized, audit = normalize_bubble_layout(original, 2)
+        self.assertEqual(normalized, original)
+        self.assertFalse(audit["applied"])
+
+    def test_v9_content_focus_exposes_no_action_or_generated_text(self):
+        focus = _v9_content_focus({
+            "primary_move": "answer",
+            "content_direction": "weekend plan",
+            "generated_message": "must stay private",
+        })
+        self.assertEqual(focus, {"content_direction": "weekend plan"})
 
     def test_question_audit_ignores_rhetorical_tag_and_rejects_two_questions(self):
         self.assertEqual(_information_question_count("That's fair, you know?"), 0)
