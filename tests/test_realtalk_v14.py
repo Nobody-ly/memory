@@ -17,6 +17,7 @@ from src.experiments.realtalk_v14 import (
     build_progressive_gate_manifest,
     classify_interaction_trigger,
     decision_plan_audit,
+    _information_question_count,
     retrieve_ca_behavior_examples,
     run_v14,
     summarize_behavior_bank,
@@ -274,6 +275,12 @@ class RealTalkV14Tests(unittest.TestCase):
         audit = actor_structure_audit("First bubble\nSecond bubble?", _decision()["message_plan"])
         self.assertTrue(audit["bubble_count_match"])
         self.assertTrue(audit["question_permission_match"])
+
+    def test_question_audit_ignores_rhetorical_tag_and_rejects_two_questions(self):
+        self.assertEqual(_information_question_count("That's fair, you know?"), 0)
+        self.assertEqual(_information_question_count("Where? Why?"), 2)
+        audit = actor_structure_audit("Where? Why?", _decision()["message_plan"])
+        self.assertFalse(audit["question_permission_match"])
 
     def test_gate6_replay_freezes_v9_upstream_and_completes(self):
         self_domains = {item["speaker"]: _self_domain() for item in self.prepared}

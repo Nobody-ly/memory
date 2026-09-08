@@ -44,7 +44,7 @@ from .realtalk_v14_schemas import DECISION_SCHEMA, normalize_v14_decision
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v14_2_ca_behavior_turn_bundle"
+PROTOCOL = "realtalk_task1_ours_v14_3_ca_behavior_turn_bundle"
 EXPECTED_V9_COMMIT = "5927bbff03fda74eebaeb99e0c57203a644cfd74"
 EXPECTED_V9_PREDICTIONS_SHA256 = (
     "ba3941f9fd2088f7d6877409c0ed1f468002ded304e782560e1475da3a9bad81"
@@ -72,6 +72,11 @@ moves. Select one primary move and up to two supporting moves in their intended 
 question, reflection, acknowledgement, or self-disclosure; include each only when the visible interaction,
 the person's observed behavior, or close Ca analogues support it. Conversely, do not compress a naturally
 multi-part response into a mechanical single action when the person regularly combines moves.
+Multiple bubbles do not imply multiple social moves: several bubbles may simply realize one answer, update,
+or reaction in the target's habitual rhythm. Most ordinary turns should have no supporting move. Add one only
+when it contributes content that the primary move cannot naturally carry; add two only with unusually strong
+evidence. In particular, do not prepend an acknowledgement merely to make an answer or self-disclosure sound
+polite, engaged, or complete.
 The free-text content_direction must agree with question_plan: when question_plan is none, it must not ask,
 inquire, end with a question, or tell the Actor to find out another detail.
 
@@ -147,11 +152,17 @@ PRIVATE TURN PLAN:
 
 Write one natural conversational turn as {speaker}. Complete the primary move and only the compatible
 supporting moves in the plan. Match the planned relationship register, reflection depth, length band, and
-question plan. Ask no question when question_plan is none. Produce exactly bubble_count non-empty chat
+question plan. Ask no information-seeking question when question_plan is none; when it permits a question,
+ask exactly one. Produce exactly bubble_count non-empty chat
 bubbles, separated with newline characters and without numbers or labels. Keep short plans compact; do not
 turn them into polished explanations merely to fill several bubbles. Ca analogue metadata describes old turn
 shape only and contains no current facts. A fact stated by the partner remains the partner's fact and must
 not be rewritten as your own experience, workplace, activity, feeling, plan, or preference.
+When reflection_depth is none, state any answer, preference, plan, or status directly; do not frame it as
+"I think", "I feel", "I guess", a reason, self-analysis, or interpretation. Surface permits one simple stance
+or feeling without an explanation. Brief permits one concise reflective explanation. Do not add praise,
+validation, concern, or an evaluative acknowledgement just to make an ordinary turn sound warmer or more
+complete. Warm or supportive language must come from the current situation and plan, not generic polish.
 Do not mention the plan, domains, examples, or any internal reasoning."""
 
 
@@ -586,7 +597,7 @@ def build_progressive_gate_manifest(
 
 def actor_structure_audit(message: str, plan: dict[str, Any]) -> dict[str, Any]:
     bubbles = [line.strip() for line in message.splitlines() if line.strip()]
-    question_count = message.count("?")
+    question_count = _information_question_count(message)
     return {
         "planned_bubble_count": plan["bubble_count"],
         "observed_nonempty_lines": len(bubbles),
@@ -594,7 +605,7 @@ def actor_structure_audit(message: str, plan: dict[str, Any]) -> dict[str, Any]:
         "planned_question": plan["question_plan"] != "none",
         "observed_question_marks": question_count,
         "question_permission_match": (
-            question_count == 0 if plan["question_plan"] == "none" else question_count >= 1
+            question_count == 0 if plan["question_plan"] == "none" else question_count == 1
         ),
         "character_count": len(message),
     }
@@ -937,6 +948,16 @@ def _tokens(text: str) -> set[str]:
 
 def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(left | right) if left or right else 0.0
+
+
+def _information_question_count(text: str) -> int:
+    count = 0
+    for fragment in re.findall(r"[^?]*\?", text):
+        normalized = re.sub(r"\s+", " ", fragment).strip().casefold()
+        if re.search(r"(?:you know|right|okay|ok|isn't it|aren't they)\s*\?$", normalized):
+            continue
+        count += 1
+    return count
 
 
 def _now() -> str:
