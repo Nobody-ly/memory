@@ -23,7 +23,7 @@ from src.experiments.realtalk_v15_ca_dev import (
     _prepare_ca_dev,
     run_v15_ca_dev,
 )
-from src.experiments.realtalk_v15_schemas import normalize_v15_decision
+from src.experiments.realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
 def _decision() -> dict:
@@ -224,6 +224,28 @@ class RealTalkV15Tests(unittest.TestCase):
         invalid["alignment"]["affected_dimensions"] = []
         with self.assertRaisesRegex(ValueError, "requires at least one"):
             normalize_v15_decision(invalid)
+
+    def test_provider_schema_avoids_unsupported_array_keywords(self):
+        unsupported = {"uniqueItems", "contains", "minContains", "maxContains"}
+
+        def visit(value):
+            if isinstance(value, dict):
+                self.assertTrue(unsupported.isdisjoint(value))
+                for child in value.values():
+                    visit(child)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child)
+
+        visit(DECISION_SCHEMA)
+
+        duplicate = _decision()
+        duplicate["alignment"]["affected_dimensions"] = [
+            "turn-composition",
+            "turn-composition",
+        ]
+        with self.assertRaisesRegex(ValueError, "unique array"):
+            normalize_v15_decision(duplicate)
 
     def test_actor_contract_has_one_bubble_per_unit(self):
         audit = actor_structure_audit(

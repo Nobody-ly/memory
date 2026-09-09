@@ -89,7 +89,7 @@ TURN_UNIT_SCHEMA = {
 
 
 DECISION_SCHEMA = {
-    "name": "realtalk_ours_v15_cb_posterior_controller_v1",
+    "name": "realtalk_ours_v15_cb_posterior_controller_v2",
     "strict": True,
     "schema": {
         "type": "object",
@@ -140,7 +140,6 @@ DECISION_SCHEMA = {
                     },
                     "affected_dimensions": {
                         "type": "array",
-                        "uniqueItems": True,
                         "items": {"type": "string", "enum": list(AFFECTED_DIMENSIONS)},
                     },
                     "decision_basis": {"type": "string"},
