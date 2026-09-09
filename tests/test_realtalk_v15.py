@@ -21,6 +21,7 @@ from src.experiments.realtalk_v15_ca_dev import (
     CA_DEV_USER_DOMAIN_SCHEMA,
     V15CaDevConfig,
     _ca_dev_gate_manifest,
+    _normalize_ca_dev_evidence_id,
     _prepare_ca_dev,
     run_v15_ca_dev,
 )
@@ -240,6 +241,14 @@ class RealTalkV15Tests(unittest.TestCase):
             self.assertEqual(properties[layer]["maxItems"], 3)
             evidence = properties[layer]["items"]["properties"]["evidence_ids"]
             self.assertEqual(evidence["maxItems"], 4)
+
+        self.assertEqual(
+            _normalize_ca_dev_evidence_id("s1:t6"), "session_1:turn_6"
+        )
+        self.assertEqual(
+            _normalize_ca_dev_evidence_id("session_2:turn_17"),
+            "session_2:turn_17",
+        )
 
     def test_adaptive_alignment_names_affected_dimension(self):
         invalid = _decision()

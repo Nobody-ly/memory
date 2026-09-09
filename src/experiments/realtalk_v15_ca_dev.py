@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -95,6 +96,7 @@ For this causal development profile, keep the representation compact while readi
 - at most four evidence IDs per fact;
 - at most four entries in each update_summary field.
 Preserve the strongest stable evidence instead of fragmenting one pattern into several facts."""
+CA_DEV_EVIDENCE_ID_NORMALIZATION = "session_turn_shorthand_v1"
 
 
 @dataclass(frozen=True)
@@ -152,6 +154,7 @@ def run_v15_ca_dev(
             "controller": DECISION_SCHEMA,
         },
         "implementation_commit": _repository_commit(),
+        "ca_dev_evidence_id_normalization": CA_DEV_EVIDENCE_ID_NORMALIZATION,
     })
     checkpoint = OperationCheckpoint(output_dir / "checkpoint.json", signature)
     raw_audit = output_dir / "raw_responses.jsonl"
@@ -209,7 +212,7 @@ def run_v15_ca_dev(
                     ),
                     schema=CA_DEV_USER_DOMAIN_SCHEMA,
                     normalizer=lambda value, allowed=allowed_after: _validate_user_domain_evidence(
-                        normalize_user_domain(value), allowed
+                        _normalize_ca_dev_user_domain(value), allowed
                     ),
                     max_tokens=DOMAIN_MAX_TOKENS,
                     max_attempts=config.operation_max_attempts,
@@ -350,9 +353,10 @@ def run_v15_ca_dev(
         "prompt_hashes": _prompt_hashes(),
         "schema_hashes": {
             "self_domain": stable_hash(SELF_DOMAIN_SCHEMA),
-            "user_domain": stable_hash(USER_DOMAIN_SCHEMA),
+            "user_domain": stable_hash(CA_DEV_USER_DOMAIN_SCHEMA),
             "controller": stable_hash(DECISION_SCHEMA),
         },
+        "ca_dev_evidence_id_normalization": CA_DEV_EVIDENCE_ID_NORMALIZATION,
         "dataset_manifest": dataset_manifest,
         "gate": config.gate,
         "preflight": preflight,
@@ -430,6 +434,28 @@ def _prepare_ca_dev(dataset_dir: str) -> tuple[list[dict[str, Any]], dict[str, A
         "history_truncation_enabled": False,
         "generated_outputs_are_never_rolled_into_history": True,
     }
+
+
+def _normalize_ca_dev_user_domain(value: Any) -> dict[str, Any]:
+    domain = normalize_user_domain(value)
+    for layer in PROFILE_LAYERS:
+        for fact in domain[layer]:
+            fact["evidence_ids"] = [
+                _normalize_ca_dev_evidence_id(evidence_id)
+                for evidence_id in fact["evidence_ids"]
+            ]
+    return domain
+
+
+def _normalize_ca_dev_evidence_id(value: str) -> str:
+    match = re.fullmatch(
+        r"s(?:ession)?[_ -]?(\d+)\s*[:/_-]\s*t(?:urn)?[_ -]?(\d+)",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return value
+    return f"session_{int(match.group(1))}:turn_{int(match.group(2))}"
 
 
 def _ca_dev_gate_manifest(prepared: list[dict[str, Any]]) -> dict[str, list[str]]:
