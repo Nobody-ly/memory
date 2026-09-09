@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,7 @@ from .realtalk_ours import (
     _write_jsonl,
 )
 from .realtalk_ours_schemas import (
+    PROFILE_LAYERS,
     SELF_DOMAIN_SCHEMA,
     USER_DOMAIN_SCHEMA,
     empty_user_domain,
@@ -73,6 +75,26 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 PROTOCOL = "realtalk_task1_ours_v15_ca_internal_development"
 GATES = (6, 30)
+
+CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)
+CA_DEV_USER_DOMAIN_SCHEMA["name"] = "realtalk_ours_v15_ca_dev_compact_user_domain_v1"
+for _layer in PROFILE_LAYERS:
+    _layer_schema = CA_DEV_USER_DOMAIN_SCHEMA["schema"]["properties"][_layer]
+    _layer_schema["maxItems"] = 3
+    _layer_schema["items"]["properties"]["evidence_ids"]["maxItems"] = 4
+for _summary_key in ("added", "revised", "removed", "uncertainties"):
+    CA_DEV_USER_DOMAIN_SCHEMA["schema"]["properties"]["update_summary"]["properties"][
+        _summary_key
+    ]["maxItems"] = 4
+
+CA_DEV_USER_DOMAIN_SYSTEM_PROMPT = USER_DOMAIN_SYSTEM_PROMPT + """
+
+For this causal development profile, keep the representation compact while reading the complete session:
+- at most three non-overlapping facts per layer;
+- each value is one concise sentence of at most about twenty words;
+- at most four evidence IDs per fact;
+- at most four entries in each update_summary field.
+Preserve the strongest stable evidence instead of fragmenting one pattern into several facts."""
 
 
 @dataclass(frozen=True)
@@ -126,7 +148,7 @@ def run_v15_ca_dev(
         "prompt_hashes": _prompt_hashes(),
         "schemas": {
             "self_domain": SELF_DOMAIN_SCHEMA,
-            "user_domain": USER_DOMAIN_SCHEMA,
+            "user_domain": CA_DEV_USER_DOMAIN_SCHEMA,
             "controller": DECISION_SCHEMA,
         },
         "implementation_commit": _repository_commit(),
@@ -178,14 +200,14 @@ def run_v15_ca_dev(
                     checkpoint=checkpoint,
                     backend=backend,
                     operation_key=f"ca_dev_user:{speaker_id}:after:{session_id}",
-                    system_prompt=USER_DOMAIN_SYSTEM_PROMPT,
+                    system_prompt=CA_DEV_USER_DOMAIN_SYSTEM_PROMPT,
                     user_prompt=USER_DOMAIN_USER_TEMPLATE.format(
                         speaker=speaker,
                         partner=item["partner"],
                         previous_domain=_json(domain),
                         completed_session=_turns_with_ids(turns),
                     ),
-                    schema=USER_DOMAIN_SCHEMA,
+                    schema=CA_DEV_USER_DOMAIN_SCHEMA,
                     normalizer=lambda value, allowed=allowed_after: _validate_user_domain_evidence(
                         normalize_user_domain(value), allowed
                     ),

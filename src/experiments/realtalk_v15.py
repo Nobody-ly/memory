@@ -75,6 +75,11 @@ chat rhythm naturally splits one contribution across bubbles. Do not add acknowl
 self-disclosure, warmth, or a question merely to make the turn comprehensive. Conversely, do not compress a
 person who commonly combines compatible moves when the current exchange supports them.
 
+Treat one unit as the default. Use multiple units only when both the observed bubble statistics and the
+current exchange support separate conversational moves. Do not create an extra bubble merely because a
+secondary act could be relevant; omit that act when it is not necessary. Match the target's demonstrated
+message rhythm instead of maximizing the number of acts or bubbles.
+
 Only clarification-question, follow-up-question, and reciprocal-question acts may ask an information-seeking
 question. Give every question act one concrete question_target; every other act must have an empty
 question_target. Use clarification-question only to ask for missing meaning, follow-up-question only to ask

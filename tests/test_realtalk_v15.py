@@ -18,6 +18,7 @@ from src.experiments.realtalk_v15 import (
     run_v15,
 )
 from src.experiments.realtalk_v15_ca_dev import (
+    CA_DEV_USER_DOMAIN_SCHEMA,
     V15CaDevConfig,
     _ca_dev_gate_manifest,
     _prepare_ca_dev,
@@ -225,6 +226,20 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "must describe exactly one"):
             normalize_v15_decision(invalid)
+
+        invalid = _decision()
+        invalid["turn_plan"]["turn_units"][0]["content_slot"] = (
+            "What movie were you watching earlier?"
+        )
+        with self.assertRaisesRegex(ValueError, "must not describe"):
+            normalize_v15_decision(invalid)
+
+    def test_ca_dev_user_domain_schema_is_compact(self):
+        properties = CA_DEV_USER_DOMAIN_SCHEMA["schema"]["properties"]
+        for layer in ("core", "regulation", "cognition", "identity", "behavior"):
+            self.assertEqual(properties[layer]["maxItems"], 3)
+            evidence = properties[layer]["items"]["properties"]["evidence_ids"]
+            self.assertEqual(evidence["maxItems"], 4)
 
     def test_adaptive_alignment_names_affected_dimension(self):
         invalid = _decision()

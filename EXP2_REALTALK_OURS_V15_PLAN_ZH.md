@@ -39,6 +39,10 @@ Ca 只提供消息长度、气泡、问题、自我披露与结构统计，不�
 `clarification-question`、`follow-up-question` 和 `reciprocal-question` 标签；这三类单元必须
 明确给出提问对象，其他动作不得携带问题。
 
+Ca 内部开发的临时 User Domain 为避免服务端长输出截断，每层保留最多 3 条最强事实；三个
+Session 的源文本仍逐字完整输入。该限制只用于 Ca Prompt 开发，正式 Cb 继续复用 V9 已冻结的
+逐样本完整五层 User Domain。
+
 ## 3. 开发与冻结
 
 先进行 Ca 内部开发：

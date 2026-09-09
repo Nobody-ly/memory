@@ -277,6 +277,10 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             raise ValueError(
                 f"question act {act!r} content_slot must describe exactly one information question"
             )
+        if act not in QUESTION_ACTS and _describes_information_question(content_slot):
+            raise ValueError(
+                f"non-question act {act!r} content_slot must not describe an information question"
+            )
         if act not in QUESTION_ACTS and target:
             raise ValueError(f"non-question act {act!r} must have empty question_target")
         normalized_units.append({
