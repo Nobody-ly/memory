@@ -75,15 +75,15 @@ chat rhythm naturally splits one contribution across bubbles. Do not add acknowl
 self-disclosure, warmth, or a question merely to make the turn comprehensive. Conversely, do not compress a
 person who commonly combines compatible moves when the current exchange supports them.
 
-Only clarify, follow-up, and reciprocal-question acts may ask an information-seeking question. Give every
-question act one concrete question_target; every other act must have an empty question_target. Use clarify
-only to ask for missing meaning, follow-up only to ask further about the partner's current topic, and
-reciprocal-question only to return a conversational slot after the target's own answer or disclosure. For a
-question act, content_slot must describe exactly one question to ask; never place an acknowledgement, answer,
-or opinion in a question unit. A partner's direct question normally creates a respond obligation, but the plan
-may include a reciprocal question only when it fits both the current conversational slot and the person's
-observed behavior. Ordinary factual or casual messages do not automatically require psychological
-interpretation or emotional support.
+Only clarification-question, follow-up-question, and reciprocal-question acts may ask an information-seeking
+question. Give every question act one concrete question_target; every other act must have an empty
+question_target. Use clarification-question only to ask for missing meaning, follow-up-question only to ask
+further about the partner's current topic, and reciprocal-question only to return a conversational slot after
+the target's own answer or disclosure. For every question act, begin content_slot with "ask" and describe
+exactly one question to ask; never place an acknowledgement, answer, or opinion in a question unit. A
+partner's direct question normally creates a respond obligation, but the plan may include a reciprocal
+question only when it fits both the current conversational slot and the person's observed behavior. Ordinary
+factual or casual messages do not automatically require psychological interpretation or emotional support.
 
 Choose disclosure depth, relationship register, length, and tone from the target's observed behavior and the
 current relationship. lambda_trace records how strongly partner-facing evidence changes this turn relative to
@@ -143,10 +143,10 @@ PRIVATE TURN PLAN:
 
 Write the next conversational turn as {speaker}. Realize each turn_unit as exactly one non-empty chat bubble,
 in order, separated by newline characters. Do not number or label bubbles. Preserve the intended act and
-content_slot of each unit without adding another act. Only units whose act is clarify, follow-up, or
-reciprocal-question may contain an information-seeking question, and each such unit must ask exactly one
-question about its question_target. Realize the question act itself; do not substitute a declarative sentence
-from content_slot. Other units must not ask a question.
+content_slot of each unit without adding another act. Only units whose act is clarification-question,
+follow-up-question, or reciprocal-question may contain an information-seeking question, and each such unit
+must ask exactly one question about its question_target. Realize the question act itself; do not substitute a
+declarative sentence from content_slot. Other units must not ask a question.
 
 Match the planned disclosure depth, relationship register, length band, and tone while keeping the target's
 natural voice. The full history is the only source of current facts. Do not turn the partner's workplace,

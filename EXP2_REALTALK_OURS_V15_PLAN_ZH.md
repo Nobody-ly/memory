@@ -35,6 +35,10 @@ Ca 只提供消息长度、气泡、问题、自我披露与结构统计，不�
 `turn_units` 是 Actor 唯一的动作与问题控制源。lambda 是同次 Controller 决策的可审计轨迹，
 不使用固定阈值或公式生成文本。
 
+为避免把普通的“继续说一句”误标为追问，机器 Schema 使用无歧义的
+`clarification-question`、`follow-up-question` 和 `reciprocal-question` 标签；这三类单元必须
+明确给出提问对象，其他动作不得携带问题。
+
 ## 3. 开发与冻结
 
 先进行 Ca 内部开发：

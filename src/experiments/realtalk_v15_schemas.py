@@ -47,13 +47,17 @@ TURN_ACTS = (
     "acknowledge",
     "self-disclose",
     "explain-stance",
-    "clarify",
-    "follow-up",
+    "clarification-question",
+    "follow-up-question",
     "reciprocal-question",
     "topic-shift",
     "close",
 )
-QUESTION_ACTS = frozenset({"clarify", "follow-up", "reciprocal-question"})
+QUESTION_ACTS = frozenset({
+    "clarification-question",
+    "follow-up-question",
+    "reciprocal-question",
+})
 QUESTION_SLOT_PREFIXES = (
     "ask ",
     "clarify ",
@@ -91,9 +95,19 @@ TONES = (
 TURN_UNIT_SCHEMA = {
     "type": "object",
     "properties": {
-        "act": {"type": "string", "enum": list(TURN_ACTS)},
-        "content_slot": {"type": "string"},
-        "question_target": {"type": "string"},
+        "act": {
+            "type": "string",
+            "enum": list(TURN_ACTS),
+            "description": "Question acts have names ending in -question; all other acts are declarative.",
+        },
+        "content_slot": {
+            "type": "string",
+            "description": "Semantic instruction, not draft dialogue. For question acts begin with 'ask '.",
+        },
+        "question_target": {
+            "type": "string",
+            "description": "Concrete object for a question act; empty string for every non-question act.",
+        },
     },
     "required": ["act", "content_slot", "question_target"],
     "additionalProperties": False,
