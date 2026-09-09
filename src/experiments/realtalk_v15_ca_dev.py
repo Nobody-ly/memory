@@ -97,7 +97,7 @@ For this causal development profile, keep the representation compact while readi
 - at most four evidence IDs per fact;
 - at most four entries in each update_summary field.
 Preserve the strongest stable evidence instead of fragmenting one pattern into several facts."""
-CA_DEV_EVIDENCE_ID_NORMALIZATION = "session_turn_shorthand_v1"
+CA_DEV_EVIDENCE_ID_NORMALIZATION = "session_turn_shorthand_v2"
 
 
 @dataclass(frozen=True)
@@ -214,7 +214,7 @@ def run_v15_ca_dev(
                     ),
                     schema=CA_DEV_USER_DOMAIN_SCHEMA,
                     normalizer=lambda value, allowed=allowed_after: _validate_user_domain_evidence(
-                        _normalize_ca_dev_user_domain(value), allowed
+                        _normalize_ca_dev_user_domain(value, allowed), allowed
                     ),
                     max_tokens=DOMAIN_MAX_TOKENS,
                     max_attempts=config.operation_max_attempts,
@@ -439,25 +439,37 @@ def _prepare_ca_dev(dataset_dir: str) -> tuple[list[dict[str, Any]], dict[str, A
     }
 
 
-def _normalize_ca_dev_user_domain(value: Any) -> dict[str, Any]:
+def _normalize_ca_dev_user_domain(
+    value: Any, allowed_turn_ids: set[str] | None = None
+) -> dict[str, Any]:
     domain = normalize_user_domain(value)
+    allowed = allowed_turn_ids or set()
     for layer in PROFILE_LAYERS:
         for fact in domain[layer]:
             fact["evidence_ids"] = [
-                _normalize_ca_dev_evidence_id(evidence_id)
+                _normalize_ca_dev_evidence_id(evidence_id, allowed)
                 for evidence_id in fact["evidence_ids"]
             ]
     return domain
 
 
-def _normalize_ca_dev_evidence_id(value: str) -> str:
+def _normalize_ca_dev_evidence_id(
+    value: str, allowed_turn_ids: set[str] | None = None
+) -> str:
     match = re.fullmatch(
         r"s(?:ession)?[_ -]?(\d+)\s*[:/_-]\s*t(?:urn)?[_ -]?(\d+)",
         value.strip(),
         flags=re.IGNORECASE,
     )
     if not match:
-        return value
+        bare = re.fullmatch(r"(?:turn[_ -]?|t)(\d+)", value.strip(), flags=re.IGNORECASE)
+        if not bare:
+            return value
+        suffix = f":turn_{int(bare.group(1))}"
+        candidates = sorted(
+            item for item in (allowed_turn_ids or set()) if item.endswith(suffix)
+        )
+        return candidates[0] if len(candidates) == 1 else value
     return f"session_{int(match.group(1))}:turn_{int(match.group(2))}"
 
 

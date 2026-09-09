@@ -257,6 +257,18 @@ class RealTalkV15Tests(unittest.TestCase):
             _normalize_ca_dev_evidence_id("session_2:turn_17"),
             "session_2:turn_17",
         )
+        self.assertEqual(
+            _normalize_ca_dev_evidence_id(
+                "turn_33", {"session_1:turn_33", "session_1:turn_31"}
+            ),
+            "session_1:turn_33",
+        )
+        self.assertEqual(
+            _normalize_ca_dev_evidence_id(
+                "turn_3", {"session_1:turn_3", "session_2:turn_3"}
+            ),
+            "turn_3",
+        )
 
     def test_adaptive_alignment_names_affected_dimension(self):
         invalid = _decision()
