@@ -1,0 +1,379 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from src.experiments.exp1_protocol import select_realtalk_splits, stable_hash
+from src.experiments.personaemp.client import ChatResult
+from src.experiments.realtalk_ours import RealTalkOursConfig, _prepare_dataset
+from src.experiments.realtalk_ours_schemas import empty_user_domain
+from src.experiments.realtalk_v14 import build_progressive_gate_manifest
+from src.experiments.realtalk_v15 import (
+    ACTOR_USER_TEMPLATE,
+    CONTROLLER_USER_TEMPLATE,
+    V15Config,
+    actor_structure_audit,
+    run_v15,
+)
+from src.experiments.realtalk_v15_ca_dev import (
+    V15CaDevConfig,
+    _ca_dev_gate_manifest,
+    _prepare_ca_dev,
+    run_v15_ca_dev,
+)
+from src.experiments.realtalk_v15_schemas import normalize_v15_decision
+
+
+def _decision() -> dict:
+    return {
+        "situation": {
+            "partner_act": "question",
+            "conversational_obligation": "respond",
+            "topic": "current plans",
+            "uncertainty": "low",
+        },
+        "relevant_user_domain": [],
+        "alignment": {
+            "orientation": "balanced",
+            "lambda_trace": 0.35,
+            "adaptation_source": "current-partner-turn",
+            "affected_dimensions": ["turn-composition"],
+            "decision_basis": "The direct question shapes the turn composition.",
+        },
+        "turn_plan": {
+            "turn_units": [
+                {
+                    "act": "answer",
+                    "content_slot": "answer the current question",
+                    "question_target": "",
+                },
+                {
+                    "act": "reciprocal-question",
+                    "content_slot": "return the same conversational slot",
+                    "question_target": "the partner's current plan",
+                },
+            ],
+            "disclosure_depth": "surface",
+            "relationship_register": "casual-close",
+            "length_band": "typical",
+            "tone": "casual",
+        },
+    }
+
+
+def _self_domain() -> dict:
+    return {
+        "identity_context": {
+            "self_descriptions": [],
+            "life_background": [],
+            "relationships": [],
+            "recurring_interests": [],
+        },
+        "communication_signature": {
+            "tone": ["casual"],
+            "vocabulary_and_phrasing": ["informal"],
+            "information_density": "medium",
+            "typical_message_scale": "typical",
+            "expression_patterns": ["natural replies"],
+        },
+        "interaction_policy_prior": {
+            "initiative": "moderate",
+            "self_disclosure": "moderate",
+            "question_behavior": "moderate",
+            "topic_continuation": "moderate",
+            "topic_shift": "occasional",
+            "advice_behavior": "occasional",
+            "response_to_partner_emotion": "contextual",
+        },
+        "affective_social_signature": {
+            "emotion_expression": "moderate",
+            "sentiment_style": "casual",
+            "introspection_style": "brief",
+            "follow_up_style": "natural",
+            "warmth_style": "friendly",
+            "closeness_style": "casual",
+        },
+        "boundaries_and_uncertainty": {
+            "stable_boundaries": [],
+            "uncertain_attributes": [],
+        },
+        "observable_statistics": {
+            "target_message_count": 10,
+            "mean_characters": 80.0,
+            "median_characters": 70.0,
+            "question_rate": 0.4,
+            "first_person_rate": 0.5,
+            "reflective_marker_rate": 0.1,
+            "evaluative_opener_rate": 0.1,
+            "median_merged_bubbles": 2.0,
+        },
+    }
+
+
+class FakeV15Backend:
+    model = "deepseek-v4-flash"
+    base_url = "https://example.invalid/v1"
+
+    def __init__(self, fail_first_actor: bool = False):
+        self.calls = []
+        self.fail_first_actor = fail_first_actor
+        self.actor_calls = 0
+        self.token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "calls": 0,
+            "network_attempts": 0,
+            "network_retries": 0,
+        }
+
+    def available_models(self):
+        return [self.model]
+
+    def chat(
+        self,
+        system_prompt,
+        user_prompt,
+        *,
+        temperature,
+        max_tokens,
+        top_p=0.9,
+        response_schema=None,
+        enable_thinking=None,
+    ):
+        self.calls.append({
+            "system": system_prompt,
+            "user": user_prompt,
+            "schema": response_schema["name"] if response_schema else None,
+        })
+        if response_schema:
+            content = json.dumps(_decision())
+        elif max_tokens == 8:
+            content = "READY"
+        else:
+            self.actor_calls += 1
+            if self.fail_first_actor and self.actor_calls == 1:
+                content = "One combined bubble with a question?"
+            else:
+                content = "I am keeping it simple.\nHow about your plan?"
+        self.token_usage["calls"] += 1
+        self.token_usage["network_attempts"] += 1
+        return ChatResult(content, self.model, 10, 5, 0.01, 1, "")
+
+
+class FakeV15CaDevBackend(FakeV15Backend):
+    def chat(
+        self,
+        system_prompt,
+        user_prompt,
+        *,
+        temperature,
+        max_tokens,
+        top_p=0.9,
+        response_schema=None,
+        enable_thinking=None,
+    ):
+        if response_schema and "self_domain" in response_schema["name"]:
+            marker = "DETERMINISTIC OBSERVABLE STATISTICS (copy exactly):\n"
+            stats_text = user_prompt.split(marker, 1)[1].split(
+                "\n\nBuild the fixed", 1
+            )[0]
+            value = _self_domain()
+            value["observable_statistics"] = json.loads(stats_text)
+            self.calls.append({"system": system_prompt, "user": user_prompt, "schema": response_schema["name"]})
+            return ChatResult(json.dumps(value), self.model, 10, 5, 0.01, 1, "")
+        if response_schema and "user_domain" in response_schema["name"]:
+            self.calls.append({"system": system_prompt, "user": user_prompt, "schema": response_schema["name"]})
+            return ChatResult(json.dumps(empty_user_domain()), self.model, 10, 5, 0.01, 1, "")
+        return super().chat(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            response_schema=response_schema,
+            enable_thinking=enable_thinking,
+        )
+
+
+class RealTalkV15Tests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        config = RealTalkOursConfig(compute_local_metrics=False)
+        _, cls.prepared = _prepare_dataset(
+            config, select_realtalk_splits(config.dataset_dir)
+        )
+
+    def test_schema_accepts_turn_units_and_question_permissions(self):
+        normalized = normalize_v15_decision(_decision())
+        self.assertEqual(len(normalized["turn_plan"]["turn_units"]), 2)
+
+        invalid = _decision()
+        invalid["turn_plan"]["turn_units"][0]["question_target"] = "the plan"
+        with self.assertRaisesRegex(ValueError, "must have empty question_target"):
+            normalize_v15_decision(invalid)
+
+        invalid = _decision()
+        invalid["turn_plan"]["turn_units"][1]["question_target"] = ""
+        with self.assertRaisesRegex(ValueError, "requires question_target"):
+            normalize_v15_decision(invalid)
+
+    def test_adaptive_alignment_names_affected_dimension(self):
+        invalid = _decision()
+        invalid["alignment"]["affected_dimensions"] = []
+        with self.assertRaisesRegex(ValueError, "requires at least one"):
+            normalize_v15_decision(invalid)
+
+    def test_actor_contract_has_one_bubble_per_unit(self):
+        audit = actor_structure_audit(
+            "First answer.\nWhat about your plan?",
+            _decision()["turn_plan"],
+            "Emi",
+        )
+        self.assertTrue(audit["blocking_contract_passed"])
+        failed = actor_structure_audit(
+            "First answer. What about your plan?",
+            _decision()["turn_plan"],
+            "Emi",
+        )
+        self.assertFalse(failed["bubble_count_match"])
+
+    def test_prompts_exclude_v9_decision_raw_ca_and_metrics(self):
+        controller = CONTROLLER_USER_TEMPLATE.casefold()
+        actor = ACTOR_USER_TEMPLATE.casefold()
+        self.assertNotIn("v9 decision", controller)
+        self.assertNotIn("behavior analog", controller)
+        self.assertNotIn("ground truth", controller)
+        self.assertNotIn("user domain", actor)
+        self.assertNotIn("lambda", actor)
+        self.assertNotIn("reflectiveness", actor)
+        self.assertNotIn("grounding", actor)
+        self.assertNotIn("intimacy", actor)
+
+    def test_gate_manifest_is_nested_and_gate30_covers_all_cells(self):
+        manifest = build_progressive_gate_manifest(self.prepared)
+        previous = set()
+        for gate in (6, 18, 30, 60, 120, 519):
+            current = set(manifest[str(gate)])
+            self.assertEqual(len(current), gate)
+            self.assertTrue(previous.issubset(current))
+            previous = current
+
+    def test_ca_development_uses_sessions_1_2_and_targets_only_session_3(self):
+        prepared, manifest = _prepare_ca_dev("dataset")
+        gates = _ca_dev_gate_manifest(prepared)
+        self.assertEqual(len(gates["6"]), 6)
+        self.assertEqual(len(gates["30"]), 30)
+        self.assertTrue(set(gates["6"]).issubset(gates["30"]))
+        self.assertEqual(manifest["profile_sessions"], [1, 2])
+        for item in prepared:
+            self.assertEqual(len(item["profile"]["sessions"]), 2)
+            third_session = item["points"][0]["test_sessions"][2]
+            self.assertTrue(all(
+                point["target_session"] == third_session for point in item["points"]
+            ))
+            self.assertTrue(all(point["context_truncated"] is False for point in item["points"]))
+            self.assertTrue(all(
+                point["target_message"] not in [
+                    turn["content"] for turn in point["context_turns"][-1:]
+                ]
+                for point in item["points"]
+            ))
+
+    def test_gate6_replays_v9_upstream_without_v9_decision(self):
+        self_domains = {item["speaker"]: _self_domain() for item in self.prepared}
+        rows = []
+        for item in self.prepared:
+            speaker_id = item["speaker"].casefold().replace(" ", "_")
+            for point in item["points"]:
+                rows.append({
+                    "result_id": f"{speaker_id}:{point['sample_id']}",
+                    "speaker": item["speaker"],
+                    "partner": item["partner"],
+                    "train_chat": item["split"]["train_chat"],
+                    "test_chat": item["split"]["test_chat"],
+                    "profile_sessions": list(item["profile"]["sessions"]),
+                    "test_sessions": list(point["test_sessions"]),
+                    "target_session": point["target_session"],
+                    "message_level_index": point["message_level_index"],
+                    "target_turn_id": point["target"]["turn_id"],
+                    "context_turn_ids": [turn["turn_id"] for turn in point["context_turns"]],
+                    "context_hash": point["history_hash"],
+                    "context_truncated": False,
+                    "ground_truth": point["target_message"],
+                    "generated_message": "V9 output must remain private",
+                    "self_domain_hash": stable_hash(self_domains[item["speaker"]]),
+                    "user_domain": empty_user_domain(),
+                    "user_domain_completed_session_updates": [],
+                    "situation": {"private": "v9 situation"},
+                    "alignment": {"private": "v9 alignment"},
+                    "next_action": {"private": "v9 action"},
+                })
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            predictions = root / "v9_predictions.jsonl"
+            predictions.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            )
+            domains = root / "self_domains.json"
+            domains.write_text(json.dumps(self_domains), encoding="utf-8")
+            output = root / "v15"
+            backend = FakeV15Backend(fail_first_actor=True)
+            summary = run_v15(
+                V15Config(
+                    dataset_dir="dataset",
+                    v9_predictions=str(predictions),
+                    v9_self_domains=str(domains),
+                    output_dir=str(output),
+                    gate=6,
+                    fresh=True,
+                    enforce_canonical_v9=False,
+                ),
+                backend=backend,
+            )
+            self.assertTrue(summary["generation_complete"])
+            self.assertEqual(summary["records"], 6)
+            controller_calls = [call for call in backend.calls if call["schema"]]
+            actor_calls = [
+                call for call in backend.calls
+                if not call["schema"] and "PRIVATE TURN PLAN" in call["user"]
+            ]
+            self.assertEqual(len(controller_calls), 6)
+            self.assertEqual(len(actor_calls), 7)
+            all_prompts = "\n".join(call["user"] for call in backend.calls)
+            self.assertNotIn("V9 output must remain private", all_prompts)
+            self.assertNotIn('"private": "v9 action"', all_prompts)
+            results = [
+                json.loads(line)
+                for line in (output / "predictions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(results[0]["actor_structure_audit"]["actor_attempts"], 2)
+            self.assertTrue(all(row["context_truncated"] is False for row in results))
+
+    def test_ca_dev_gate6_runs_only_on_session3_and_is_not_table2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "ca_dev"
+            result = run_v15_ca_dev(
+                V15CaDevConfig(
+                    dataset_dir="dataset",
+                    output_dir=str(output),
+                    gate=6,
+                    fresh=True,
+                ),
+                backend=FakeV15CaDevBackend(),
+            )
+            self.assertTrue(result["complete"])
+            self.assertEqual(result["records"], 6)
+            manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("excluded from Table 2", manifest["purpose"])
+            rows = [
+                json.loads(line)
+                for line in (output / "predictions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertTrue(all(row["ca_internal_development_only"] for row in rows))
+            self.assertTrue(all(row["target_session"] not in row["profile_sessions"] for row in rows))
+
+
+if __name__ == "__main__":
+    unittest.main()
