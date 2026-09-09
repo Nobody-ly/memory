@@ -11,6 +11,7 @@ from src.experiments.realtalk_ours import RealTalkOursConfig, _prepare_dataset
 from src.experiments.realtalk_ours_schemas import empty_user_domain
 from src.experiments.realtalk_v14 import build_progressive_gate_manifest
 from src.experiments.realtalk_v15 import (
+    ACTOR_REPAIR_TEMPLATE,
     ACTOR_USER_TEMPLATE,
     CONTROLLER_USER_TEMPLATE,
     V15Config,
@@ -347,6 +348,8 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertNotIn("reflectiveness", actor)
         self.assertNotIn("grounding", actor)
         self.assertNotIn("intimacy", actor)
+        self.assertIn("preliminary question", actor)
+        self.assertIn("one question that directly", ACTOR_REPAIR_TEMPLATE.casefold())
 
     def test_gate_manifest_is_nested_and_gate30_covers_all_cells(self):
         manifest = build_progressive_gate_manifest(self.prepared)

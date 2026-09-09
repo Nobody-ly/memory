@@ -154,8 +154,9 @@ content_slot of each unit without adding another act. Only units whose act is cl
 follow-up-question, or reciprocal-question may contain an information-seeking question, and each such unit
 must ask exactly one question about its question_target. Realize the question act itself; do not substitute a
 declarative sentence from content_slot. Use one direct grammatical question and exactly one question mark;
-do not prepend a separate "What about you?" or add an alternative second question. Other units must not ask
-a question.
+begin directly with that question. Do not restate or confirm the partner's message as a preliminary question,
+do not prepend a separate "Really?" or "What about you?", and do not add an alternative second question.
+Other units must not ask a question.
 
 Match the planned disclosure depth, relationship register, length band, and tone while keeping the target's
 natural voice. The full history is the only source of current facts. Do not turn the partner's workplace,
@@ -174,8 +175,9 @@ Prior draft:
 
 Generate the turn again with the same meaning and the same frozen turn units. Correct only the reported
 format or question-permission errors. A question unit must contain one direct grammatical question with one
-question mark, never a two-question sequence such as "What about you? Do you...?". Do not add facts, change
-the acts, or redesign the plan."""
+question mark. Delete any preliminary confirmation question and keep only the one question that directly
+targets question_target; never emit a sequence such as "Really? Do you...?" or "What about you? Do you...?".
+Do not add facts, change the acts, or redesign the plan."""
 
 
 @dataclass(frozen=True)
