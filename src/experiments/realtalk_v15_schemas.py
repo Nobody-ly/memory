@@ -54,6 +54,18 @@ TURN_ACTS = (
     "close",
 )
 QUESTION_ACTS = frozenset({"clarify", "follow-up", "reciprocal-question"})
+QUESTION_SLOT_PREFIXES = (
+    "ask ",
+    "clarify ",
+    "find out ",
+    "check whether ",
+    "check if ",
+)
+QUESTION_WORDS = frozenset({
+    "what", "which", "who", "whom", "whose", "when", "where", "why", "how",
+    "do", "does", "did", "is", "are", "was", "were", "can", "could", "would",
+    "will", "have", "has", "had",
+})
 DISCLOSURE_DEPTHS = ("none", "surface", "personal", "vulnerable")
 RELATIONSHIP_REGISTERS = (
     "reserved",
@@ -244,13 +256,18 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
         )
         if act in QUESTION_ACTS and not target:
             raise ValueError(f"question act {act!r} requires question_target")
+        content_slot = _text(
+            item["content_slot"], f"turn_plan.turn_units[{index}].content_slot"
+        )
+        if act in QUESTION_ACTS and not _describes_information_question(content_slot):
+            raise ValueError(
+                f"question act {act!r} content_slot must describe exactly one information question"
+            )
         if act not in QUESTION_ACTS and target:
             raise ValueError(f"non-question act {act!r} must have empty question_target")
         normalized_units.append({
             "act": act,
-            "content_slot": _text(
-                item["content_slot"], f"turn_plan.turn_units[{index}].content_slot"
-            ),
+            "content_slot": content_slot,
             "question_target": target,
         })
 
@@ -289,6 +306,16 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             "tone": _enum(plan["tone"], TONES, "turn_plan.tone"),
         },
     }
+
+
+def _describes_information_question(value: str) -> bool:
+    lowered = value.strip().casefold()
+    if lowered.startswith(QUESTION_SLOT_PREFIXES):
+        return True
+    if "?" in lowered:
+        return True
+    first = lowered.split(maxsplit=1)[0] if lowered else ""
+    return first in QUESTION_WORDS
 
 
 def _exact_object(value: Any, schema: dict[str, Any], path: str) -> dict[str, Any]:

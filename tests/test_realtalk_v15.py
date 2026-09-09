@@ -51,7 +51,7 @@ def _decision() -> dict:
                 },
                 {
                     "act": "reciprocal-question",
-                    "content_slot": "return the same conversational slot",
+                    "content_slot": "ask about the partner's current plan",
                     "question_target": "the partner's current plan",
                 },
             ],
@@ -217,6 +217,13 @@ class RealTalkV15Tests(unittest.TestCase):
         invalid = _decision()
         invalid["turn_plan"]["turn_units"][1]["question_target"] = ""
         with self.assertRaisesRegex(ValueError, "requires question_target"):
+            normalize_v15_decision(invalid)
+
+        invalid = _decision()
+        invalid["turn_plan"]["turn_units"][1]["content_slot"] = (
+            "That sounds like an interesting plan."
+        )
+        with self.assertRaisesRegex(ValueError, "must describe exactly one"):
             normalize_v15_decision(invalid)
 
     def test_adaptive_alignment_names_affected_dimension(self):
