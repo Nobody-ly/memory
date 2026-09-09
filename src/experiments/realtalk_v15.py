@@ -151,7 +151,9 @@ in order, separated by newline characters. Do not number or label bubbles. Prese
 content_slot of each unit without adding another act. Only units whose act is clarification-question,
 follow-up-question, or reciprocal-question may contain an information-seeking question, and each such unit
 must ask exactly one question about its question_target. Realize the question act itself; do not substitute a
-declarative sentence from content_slot. Other units must not ask a question.
+declarative sentence from content_slot. Use one direct grammatical question and exactly one question mark;
+do not prepend a separate "What about you?" or add an alternative second question. Other units must not ask
+a question.
 
 Match the planned disclosure depth, relationship register, length band, and tone while keeping the target's
 natural voice. The full history is the only source of current facts. Do not turn the partner's workplace,
@@ -169,7 +171,9 @@ Prior draft:
 {draft}
 
 Generate the turn again with the same meaning and the same frozen turn units. Correct only the reported
-format or question-permission errors. Do not add facts, change the acts, or redesign the plan."""
+format or question-permission errors. A question unit must contain one direct grammatical question with one
+question mark, never a two-question sequence such as "What about you? Do you...?". Do not add facts, change
+the acts, or redesign the plan."""
 
 
 @dataclass(frozen=True)

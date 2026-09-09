@@ -235,6 +235,12 @@ class RealTalkV15Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not describe"):
             normalize_v15_decision(invalid)
 
+        rhetorical = _decision()
+        rhetorical["turn_plan"]["turn_units"][0]["content_slot"] = (
+            "Interactive stories sound interesting, you know?"
+        )
+        normalize_v15_decision(rhetorical)
+
     def test_ca_dev_user_domain_schema_is_compact(self):
         properties = CA_DEV_USER_DOMAIN_SCHEMA["schema"]["properties"]
         for layer in ("core", "regulation", "cognition", "identity", "behavior"):

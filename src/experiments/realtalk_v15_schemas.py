@@ -1,6 +1,7 @@
 """Strict contracts for the REALTALK V15 behavior controller."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .realtalk_ours_schemas import PROFILE_LAYERS
@@ -330,7 +331,10 @@ def _describes_information_question(value: str) -> bool:
     lowered = value.strip().casefold()
     if lowered.startswith(QUESTION_SLOT_PREFIXES):
         return True
-    if "?" in lowered:
+    for fragment in re.findall(r"[^?]*\?", lowered):
+        normalized = " ".join(fragment.split())
+        if normalized.endswith(("you know?", "right?", "okay?", "ok?", "isn't it?", "aren't they?")):
+            continue
         return True
     first = lowered.split(maxsplit=1)[0] if lowered else ""
     return first in QUESTION_WORDS
