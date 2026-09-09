@@ -33,14 +33,12 @@ from .realtalk_ours import (
     _failure,
     _json,
     _observable_statistics,
-    _profile_activation_whitelist,
     _repository_commit,
     _safe_host,
     _speaker_id,
     _structured_call,
     _turns_with_ids,
     _turns_with_session_boundaries,
-    _validate_decision_profile_activation,
     _validate_observable_statistics,
     _validate_user_domain_evidence,
     _write_json,
@@ -70,6 +68,9 @@ from .realtalk_v15 import (
     _prompt_hashes,
     _run_actor_with_contract_retries,
     aggregate_v15_diagnostics,
+    build_v15_activation_whitelist,
+    resolve_v15_profile_activation,
+    _v15_activation_whitelist_text,
 )
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
@@ -121,6 +122,7 @@ def run_v15_ca_dev(
         _clear_outputs(output_dir)
     elif config.resume and not (output_dir / "checkpoint.json").exists():
         raise ValueError("--resume requires an existing checkpoint.json")
+    (output_dir / "CA_DEVELOPMENT_COMPLETE").unlink(missing_ok=True)
 
     prepared, dataset_manifest = _prepare_ca_dev(config.dataset_dir)
     gate_manifest = _ca_dev_gate_manifest(prepared)
@@ -246,6 +248,7 @@ def run_v15_ca_dev(
         ca_summary = summarize_behavior_bank(
             build_ca_behavior_bank(item["profile"]["turns"], speaker)
         )
+        activation_facts = build_v15_activation_whitelist(domain)
         try:
             controller = _structured_call(
                 checkpoint=checkpoint,
@@ -269,11 +272,11 @@ def run_v15_ca_dev(
                     cb_behavior_summary=_json(
                         summarize_visible_target_behavior(current_session_turns, speaker)
                     ),
-                    activation_whitelist=_profile_activation_whitelist(domain),
+                    activation_whitelist=_v15_activation_whitelist_text(activation_facts),
                 ),
                 schema=DECISION_SCHEMA,
-                normalizer=lambda value, current=domain: _validate_decision_profile_activation(
-                    normalize_v15_decision(value), current
+                normalizer=lambda value, facts=activation_facts: resolve_v15_profile_activation(
+                    normalize_v15_decision(value), facts
                 ),
                 max_tokens=1600,
                 max_attempts=config.operation_max_attempts,

@@ -4,9 +4,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .realtalk_ours_schemas import PROFILE_LAYERS
-
-
 PARTNER_ACTS = (
     "none",
     "greeting",
@@ -51,7 +48,7 @@ TURN_ACTS = (
     "clarification-question",
     "follow-up-question",
     "reciprocal-question",
-    "topic-shift",
+    "topic-shift-statement",
     "close",
 )
 QUESTION_ACTS = frozenset({
@@ -116,7 +113,7 @@ TURN_UNIT_SCHEMA = {
 
 
 DECISION_SCHEMA = {
-    "name": "realtalk_ours_v15_cb_posterior_controller_v2",
+    "name": "realtalk_ours_v15_cb_posterior_controller_v3",
     "strict": True,
     "schema": {
         "type": "object",
@@ -149,10 +146,9 @@ DECISION_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "layer": {"type": "string", "enum": list(PROFILE_LAYERS)},
-                        "value": {"type": "string"},
+                        "fact_id": {"type": "string"},
                     },
-                    "required": ["layer", "value"],
+                    "required": ["fact_id"],
                     "additionalProperties": False,
                 },
             },
@@ -234,8 +230,7 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             f"relevant_user_domain[{index}]",
         )
         normalized_relevant.append({
-            "layer": _enum(item["layer"], PROFILE_LAYERS, f"relevant_user_domain[{index}].layer"),
-            "value": _text(item["value"], f"relevant_user_domain[{index}].value"),
+            "fact_id": _text(item["fact_id"], f"relevant_user_domain[{index}].fact_id"),
         })
 
     lambda_trace = _number(alignment["lambda_trace"], "alignment.lambda_trace")

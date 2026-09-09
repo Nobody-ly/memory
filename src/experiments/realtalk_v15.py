@@ -22,13 +22,11 @@ from .realtalk_ours import (
     _failure,
     _json,
     _prepare_dataset,
-    _profile_activation_whitelist,
     _repository_commit,
     _safe_host,
     _structured_call,
     _text_call,
     _turns_with_session_boundaries,
-    _validate_decision_profile_activation,
     _write_json,
     _write_jsonl,
 )
@@ -64,8 +62,9 @@ behavior summary describes how this person has actually behaved with the current
 when it has substantial evidence and conflicts with Ca, prefer the current Cb pattern. Always consider the
 reported observation counts instead of treating a small sample as stable.
 
-Use at most two User Domain facts, copied exactly from the whitelist, and only when they directly affect this
-turn. The User Domain conditions the interaction but never replaces the target's identity. Do not copy an old
+Use at most two User Domain facts by selecting their fact_id exactly from the indexed whitelist; do not copy
+or rewrite the fact text. Select facts only when they directly affect this turn. The User Domain conditions
+the interaction but never replaces the target's identity. Do not copy an old
 Ca event or partner fact as a current target fact. Current autobiographical detail must be supported by the
 visible Cb history; otherwise keep self-expression low-specificity.
 
@@ -89,6 +88,9 @@ exactly one question to ask; never place an acknowledgement, answer, or opinion 
 partner's direct question normally creates a respond obligation, but the plan may include a reciprocal
 question only when it fits both the current conversational slot and the person's observed behavior. Ordinary
 factual or casual messages do not automatically require psychological interpretation or emotional support.
+
+The topic-shift-statement act is declarative. If a topic transition is made by asking the partner something,
+use follow-up-question or reciprocal-question instead.
 
 Choose disclosure depth, relationship register, length, and tone from the target's observed behavior and the
 current relationship. lambda_trace records how strongly partner-facing evidence changes this turn relative to
@@ -123,12 +125,12 @@ TARGET'S AGGREGATE CA BEHAVIOR PRIOR (statistics only; no source text):
 TARGET'S VISIBLE Cb BEHAVIOR BEFORE THIS POINT:
 {cb_behavior_summary}
 
-EXACT USER DOMAIN ACTIVATION WHITELIST:
+INDEXED USER DOMAIN ACTIVATION WHITELIST:
 {activation_whitelist}
 
 Plan the next turn as {speaker}. Ca supplies a weak cross-partner prior; the complete visible history and
-current Cb evidence determine the present interaction. Copy activated partner facts exactly from the
-whitelist or return an empty relevant_user_domain array."""
+current Cb evidence determine the present interaction. Return only selected fact_id values from the
+whitelist, or return an empty relevant_user_domain array."""
 
 
 ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
@@ -267,6 +269,7 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
         latest_partner = _latest_partner_turn(
             point["context_turns"], speaker_data["partner"], point["target_session"]
         )
+        activation_facts = build_v15_activation_whitelist(v9["user_domain"])
         try:
             decision_envelope = _structured_call(
                 checkpoint=checkpoint,
@@ -292,13 +295,11 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                             point["context_turns"], point["speaker"]
                         )
                     ),
-                    activation_whitelist=_profile_activation_whitelist(v9["user_domain"]),
+                    activation_whitelist=_v15_activation_whitelist_text(activation_facts),
                 ),
                 schema=DECISION_SCHEMA,
-                normalizer=lambda value, domain=v9["user_domain"]: (
-                    _validate_decision_profile_activation(
-                        normalize_v15_decision(value), domain
-                    )
+                normalizer=lambda value, facts=activation_facts: (
+                    resolve_v15_profile_activation(normalize_v15_decision(value), facts)
                 ),
                 max_tokens=1600,
                 max_attempts=config.operation_max_attempts,
@@ -594,6 +595,36 @@ def _prompt_hashes() -> dict[str, str]:
         "actor_user": stable_hash(ACTOR_USER_TEMPLATE),
         "actor_repair": stable_hash(ACTOR_REPAIR_TEMPLATE),
     }
+
+
+def build_v15_activation_whitelist(user_domain: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "fact_id": f"{layer}:{index}",
+            "layer": layer,
+            "value": fact["value"],
+        }
+        for layer in ("core", "regulation", "cognition", "identity", "behavior")
+        for index, fact in enumerate(user_domain[layer])
+    ]
+
+
+def _v15_activation_whitelist_text(facts: list[dict[str, str]]) -> str:
+    return "NONE (relevant_user_domain must be [])" if not facts else _json(facts)
+
+
+def resolve_v15_profile_activation(
+    decision: dict[str, Any], facts: list[dict[str, str]]
+) -> dict[str, Any]:
+    available = {fact["fact_id"]: fact for fact in facts}
+    selected_ids = [fact["fact_id"] for fact in decision["relevant_user_domain"]]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("relevant_user_domain must not repeat fact_id values")
+    unknown = sorted(set(selected_ids) - set(available))
+    if unknown:
+        raise ValueError(f"decision activated unknown User Domain fact IDs: {unknown}")
+    decision["relevant_user_domain"] = [dict(available[fact_id]) for fact_id in selected_ids]
+    return decision
 
 
 def _validate_config(config: V15Config) -> None:

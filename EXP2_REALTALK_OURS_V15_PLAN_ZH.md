@@ -38,6 +38,8 @@ Ca 只提供消息长度、气泡、问题、自我披露与结构统计，不�
 为避免把普通的“继续说一句”误标为追问，机器 Schema 使用无歧义的
 `clarification-question`、`follow-up-question` 和 `reciprocal-question` 标签；这三类单元必须
 明确给出提问对象，其他动作不得携带问题。
+`topic-shift-statement` 明确表示陈述式换题；通过问题换题仍须使用上述提问动作。User Domain
+激活只输出稳定 `fact_id`，程序再解析回原始层级和值，避免模型改写画像事实。
 
 Ca 内部开发的临时 User Domain 为避免服务端长输出截断，每层保留最多 3 条最强事实；三个
 Session 的源文本仍逐字完整输入。该限制只用于 Ca Prompt 开发，正式 Cb 继续复用 V9 已冻结的

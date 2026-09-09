@@ -15,6 +15,8 @@ from src.experiments.realtalk_v15 import (
     CONTROLLER_USER_TEMPLATE,
     V15Config,
     actor_structure_audit,
+    build_v15_activation_whitelist,
+    resolve_v15_profile_activation,
     run_v15,
 )
 from src.experiments.realtalk_v15_ca_dev import (
@@ -261,6 +263,30 @@ class RealTalkV15Tests(unittest.TestCase):
         invalid["alignment"]["affected_dimensions"] = []
         with self.assertRaisesRegex(ValueError, "requires at least one"):
             normalize_v15_decision(invalid)
+
+    def test_user_domain_activation_uses_stable_fact_ids(self):
+        domain = empty_user_domain()
+        domain["behavior"].append({
+            "value": "shares detailed daily updates",
+            "confidence": "high",
+            "evidence_ids": ["session_1:turn_2"],
+        })
+        facts = build_v15_activation_whitelist(domain)
+        decision = _decision()
+        decision["relevant_user_domain"] = [{"fact_id": "behavior:0"}]
+        resolved = resolve_v15_profile_activation(
+            normalize_v15_decision(decision), facts
+        )
+        self.assertEqual(resolved["relevant_user_domain"], [{
+            "fact_id": "behavior:0",
+            "layer": "behavior",
+            "value": "shares detailed daily updates",
+        }])
+
+        decision = _decision()
+        decision["relevant_user_domain"] = [{"fact_id": "behavior:99"}]
+        with self.assertRaisesRegex(ValueError, "unknown User Domain fact IDs"):
+            resolve_v15_profile_activation(normalize_v15_decision(decision), facts)
 
     def test_provider_schema_avoids_unsupported_array_keywords(self):
         unsupported = {"uniqueItems", "contains", "minContains", "maxContains"}
