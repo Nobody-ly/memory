@@ -68,9 +68,14 @@ the interaction but never replaces the target's identity. Do not copy an old
 Ca event or partner fact as a current target fact. Current autobiographical detail must be supported by the
 visible Cb history; otherwise keep self-expression low-specificity.
 
-First identify the current conversational obligation. Then make one coherent turn plan containing one to six
-chat-bubble units. A unit has exactly one communicative act. Multiple units may repeat an act when the target's
-chat rhythm naturally splits one contribution across bubbles. Do not add acknowledgement, explanation,
+First identify the current conversational obligation. A merged partner turn can contain several original
+chat bubbles in chronological order. Judge the still-active obligation from that sequence, especially its
+closing social move, rather than classifying the whole turn from any earlier question mark. An earlier
+question can be followed or superseded by praise, acknowledgement, correction, or a closing statement; do
+not mechanically answer it when the latest move makes a short social response the natural continuation.
+Then make one coherent turn plan containing one to six chat-bubble units. A unit has exactly one communicative
+act. Multiple units may repeat an act when the target's chat rhythm naturally splits one contribution across
+bubbles. Do not add acknowledgement, explanation,
 self-disclosure, warmth, or a question merely to make the turn comprehensive. Conversely, do not compress a
 person who commonly combines compatible moves when the current exchange supports them.
 
@@ -96,7 +101,8 @@ Choose disclosure depth, relationship register, length, and tone from the target
 current relationship. lambda_trace records how strongly partner-facing evidence changes this turn relative to
 the stable Self prior. It is an audit trace, not a reward. Do not force it into a preset interval. Name the
 source of adaptation and the plan dimensions actually affected; self-led behavior may have no affected
-dimensions. The effect of adaptation must be visible in the structured plan rather than explained as an
+dimensions. A zero lambda_trace means no partner-driven departure and therefore cannot be labeled balanced or
+partner-adaptive. The effect of adaptation must be visible in the structured plan rather than explained as an
 abstract ideal.
 
 Return only the strict schema. Do not mention evaluation metrics or reconstruct any known reference answer."""

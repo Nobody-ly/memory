@@ -294,6 +294,11 @@ class RealTalkV15Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires at least one"):
             normalize_v15_decision(invalid)
 
+        invalid = _decision()
+        invalid["alignment"]["lambda_trace"] = 0
+        with self.assertRaisesRegex(ValueError, "requires nonzero"):
+            normalize_v15_decision(invalid)
+
     def test_user_domain_activation_uses_stable_fact_ids(self):
         domain = empty_user_domain()
         domain["behavior"].append({

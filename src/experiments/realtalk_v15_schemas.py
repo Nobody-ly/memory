@@ -249,6 +249,8 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
     )
     if orientation != "self-led" and not normalized_affected:
         raise ValueError("adaptive alignment requires at least one affected dimension")
+    if orientation != "self-led" and lambda_trace == 0:
+        raise ValueError("balanced or partner-adaptive alignment requires nonzero lambda_trace")
     if source == "self-prior" and orientation != "self-led":
         raise ValueError("self-prior adaptation source requires self-led orientation")
 
