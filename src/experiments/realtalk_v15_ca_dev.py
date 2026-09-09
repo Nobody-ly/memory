@@ -96,7 +96,19 @@ For this causal development profile, keep the representation compact while readi
 - each value is one concise sentence of at most about twenty words;
 - at most four evidence IDs per fact;
 - at most four entries in each update_summary field.
-Preserve the strongest stable evidence instead of fragmenting one pattern into several facts."""
+Preserve the strongest stable evidence instead of fragmenting one pattern into several facts.
+
+Evidence ownership is strict: the target speaker's turns are context only and can never support a fact about
+the partner. Every evidence_ids entry must be copied exactly from the explicit allowed-partner-ID whitelist in
+the user prompt. If no allowed partner turn supports a fact, omit that fact instead of citing a target turn."""
+
+CA_DEV_USER_DOMAIN_USER_TEMPLATE = USER_DOMAIN_USER_TEMPLATE + """
+
+ONLY ALLOWED PARTNER EVIDENCE IDS AFTER THIS UPDATE:
+{allowed_partner_evidence_ids}
+
+Copy evidence IDs exactly from this whitelist. Any other ID belongs to the target speaker, is not yet visible,
+or is malformed and must not appear in the output."""
 CA_DEV_EVIDENCE_ID_NORMALIZATION = "session_turn_shorthand_v2"
 
 
@@ -206,11 +218,12 @@ def run_v15_ca_dev(
                     backend=backend,
                     operation_key=f"ca_dev_user:{speaker_id}:after:{session_id}",
                     system_prompt=CA_DEV_USER_DOMAIN_SYSTEM_PROMPT,
-                    user_prompt=USER_DOMAIN_USER_TEMPLATE.format(
+                    user_prompt=CA_DEV_USER_DOMAIN_USER_TEMPLATE.format(
                         speaker=speaker,
                         partner=item["partner"],
                         previous_domain=_json(domain),
                         completed_session=_turns_with_ids(turns),
+                        allowed_partner_evidence_ids=_json(sorted(allowed_after)),
                     ),
                     schema=CA_DEV_USER_DOMAIN_SCHEMA,
                     normalizer=lambda value, allowed=allowed_after: _validate_user_domain_evidence(

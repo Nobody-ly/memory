@@ -271,6 +271,23 @@ class RealTalkV15Tests(unittest.TestCase):
             "turn_3",
         )
 
+    def test_ca_dev_user_domain_prompt_has_exact_evidence_whitelist(self):
+        from src.experiments.realtalk_v15_ca_dev import (
+            CA_DEV_USER_DOMAIN_SYSTEM_PROMPT,
+            CA_DEV_USER_DOMAIN_USER_TEMPLATE,
+        )
+
+        self.assertIn("target speaker's turns are context only", CA_DEV_USER_DOMAIN_SYSTEM_PROMPT)
+        self.assertIn("ONLY ALLOWED PARTNER EVIDENCE IDS", CA_DEV_USER_DOMAIN_USER_TEMPLATE)
+        rendered = CA_DEV_USER_DOMAIN_USER_TEMPLATE.format(
+            speaker="Target",
+            partner="Partner",
+            previous_domain="{}",
+            completed_session="session_1:turn_1 | Target: hi",
+            allowed_partner_evidence_ids='["session_1:turn_2"]',
+        )
+        self.assertIn('session_1:turn_2', rendered)
+
     def test_adaptive_alignment_names_affected_dimension(self):
         invalid = _decision()
         invalid["alignment"]["affected_dimensions"] = []
