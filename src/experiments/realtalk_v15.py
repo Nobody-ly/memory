@@ -91,7 +91,10 @@ further about the partner's current topic, and reciprocal-question only to retur
 the target's own answer or disclosure. For every question act, begin content_slot with "ask" and describe
 exactly one question to ask; never place an acknowledgement, answer, or opinion in a question unit. A
 partner's direct question normally creates a respond obligation, but the plan may include a reciprocal
-question only when it fits both the current conversational slot and the person's observed behavior. Ordinary
+question only when the current slot is genuinely symmetric and the visible history supports returning that
+same slot. Aggregate question_rate, including an after-question rate, is only an upper style tendency: it does
+not by itself license a reciprocal question after an answer. If one-bubble evidence favors one unit, keep the
+answer and omit an optional reciprocal question; never squeeze the question into the answer unit. Ordinary
 factual or casual messages do not automatically require psychological interpretation or emotional support.
 
 The topic-shift-statement act is declarative. If a topic transition is made by asking the partner something,

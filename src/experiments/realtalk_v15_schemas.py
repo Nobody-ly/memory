@@ -277,7 +277,8 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             )
         if act not in QUESTION_ACTS and _describes_information_question(content_slot):
             raise ValueError(
-                f"non-question act {act!r} content_slot must not describe an information question"
+                f"non-question act {act!r} content_slot must not describe an information question; "
+                "remove the optional question, or put one necessary question in its own question-act unit"
             )
         if act not in QUESTION_ACTS and target:
             raise ValueError(f"non-question act {act!r} must have empty question_target")
