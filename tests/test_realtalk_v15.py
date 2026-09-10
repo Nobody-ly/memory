@@ -18,6 +18,7 @@ from src.experiments.realtalk_v15 import (
     actor_structure_audit,
     build_v15_activation_whitelist,
     _fact_ownership_audit,
+    _v15_actor_self_domain,
     resolve_v15_profile_activation,
     run_v15,
 )
@@ -245,6 +246,13 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         normalize_v15_decision(rhetorical)
 
+        compound = _decision()
+        compound["turn_plan"]["turn_units"][1]["content_slot"] = (
+            "ask what her name is and if she is from Miami"
+        )
+        with self.assertRaisesRegex(ValueError, "combines multiple"):
+            normalize_v15_decision(compound)
+
     def test_ca_dev_user_domain_schema_is_compact(self):
         properties = CA_DEV_USER_DOMAIN_SCHEMA["schema"]["properties"]
         for layer in ("core", "regulation", "cognition", "identity", "behavior"):
@@ -329,6 +337,21 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertFalse(general_comment["warning"])
 
+        self_supported = _fact_ownership_audit(
+            "I live in New York.",
+            {"content": "How is New York?"},
+            context,
+            "Target",
+            {"identity_context": {"life_background": ["Target lives in New York."]}},
+        )
+        self.assertFalse(self_supported["warning"])
+
+    def test_v15_actor_self_domain_includes_identity_and_boundaries(self):
+        projected = _v15_actor_self_domain(_self_domain())
+        self.assertIn("identity_context", projected)
+        self.assertIn("boundaries_and_uncertainty", projected)
+        self.assertNotIn("user_domain", projected)
+
     def test_user_domain_activation_uses_stable_fact_ids(self):
         domain = empty_user_domain()
         domain["behavior"].append({
@@ -382,6 +405,14 @@ class RealTalkV15Tests(unittest.TestCase):
             "Emi",
         )
         self.assertTrue(audit["blocking_contract_passed"])
+
+        compound = actor_structure_audit(
+            "First answer.\nWhat is your name and are you from Miami?",
+            _decision()["turn_plan"],
+            "Target",
+        )
+        self.assertFalse(compound["blocking_contract_passed"])
+        self.assertEqual(compound["compound_question_bubbles"], 1)
         failed = actor_structure_audit(
             "First answer. What about your plan?",
             _decision()["turn_plan"],

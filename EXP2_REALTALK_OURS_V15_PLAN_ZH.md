@@ -130,3 +130,20 @@ V15.2 保持 orientation 表示本轮总体取向，lambda 只表示相对 Self 
 - 不再依据 `self-led|balanced|partner-adaptive` 人为设置 lambda 区间。
 
 事实归属阻断和其余 V15.1 改动保持不变；V15.2 使用新目录重新从 Ca Gate 6 开始。
+
+### V15.3 身份可见性与问题前提修正
+
+V15.2 首次 Cb Gate 6 正确阻断了一条伙伴事实迁移：伙伴询问 New York，Controller 直接让 Emi
+把 New York 当成自己的现居地，而冻结 Self Domain 实际记录 Emi 在 Los Angeles。审计同时发现
+Actor 使用的是旧 behavioral-only 投影，没有看到计划要求的 `identity_context` 与稳定边界。
+
+V15.3 因此：
+
+- Actor 的私有 Self Domain 增加 `identity_context` 和 `boundaries_and_uncertainty`，仍不披露 User
+  Domain、lambda、Judge 或 Ground Truth；
+- Controller 回答涉及目标人物的伙伴问题前，必须先用 Self Domain 和目标人物既往 Cb 发言验证
+  问题前提；冲突或无依据时不得接受该前提；
+- 事实归属审计把合法 Self Domain 事实加入目标人物证据池；
+- 单个 question unit 必须对应一个信息槽，禁止把姓名和来源等两个问题用 `and` 捆绑。
+
+V15.2 的失败 Cb 目录保持不变，V15.3 再次从 Ca Gate 6 开始。

@@ -17,7 +17,6 @@ from .personaemp.client import ChatBackend
 from .realtalk_ours import (
     RealTalkOursConfig,
     _backend_from_env,
-    _behavioral_self_domain,
     _checkpoint_unresolved,
     _failure,
     _json,
@@ -49,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_2_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_3_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -76,6 +75,9 @@ chat bubbles in chronological order. Judge the still-active obligation from that
 closing social move, rather than classifying the whole turn from any earlier question mark. An earlier
 question can be followed or superseded by praise, acknowledgement, correction, or a closing statement; do
 not mechanically answer it when the latest move makes a short social response the natural continuation.
+Before accepting any question premise about the target, verify it against the Self Domain and the target's
+own visible Cb statements. If the premise is unsupported or conflicts with target-owned evidence, do not
+adopt it as fact: answer only the supported part, correct it naturally, or ask one clarification when needed.
 Then make one coherent turn plan containing one to six chat-bubble units. A unit has exactly one communicative
 act. Multiple units may repeat an act when the target's chat rhythm naturally splits one contribution across
 bubbles. Do not add acknowledgement, explanation,
@@ -92,7 +94,9 @@ question. Give every question act one concrete question_target; every other act 
 question_target. Use clarification-question only to ask for missing meaning, follow-up-question only to ask
 further about the partner's current topic, and reciprocal-question only to return a conversational slot after
 the target's own answer or disclosure. For every question act, begin content_slot with "ask" and describe
-exactly one question to ask; never place an acknowledgement, answer, or opinion in a question unit. A
+exactly one question to ask. The question_target must name that one information slot, not merely the partner;
+never combine a name question with an origin question or join two interrogative clauses with "and". Never
+place an acknowledgement, answer, or opinion in a question unit. A
 partner's direct question normally creates a respond obligation, but the plan may include a reciprocal
 question only when the current slot is genuinely symmetric and the visible history supports returning that
 same slot. Aggregate question_rate, including an after-question rate, is only an upper style tendency: it does
@@ -330,7 +334,7 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                 result_id=result_id,
                 speaker=point["speaker"],
                 history=_turns_with_session_boundaries(point["context_turns"]),
-                self_domain=_behavioral_self_domain(self_domain),
+                self_domain=_v15_actor_self_domain(self_domain),
                 turn_plan=decision["turn_plan"],
                 raw_audit=raw_audit,
                 max_attempts=config.operation_max_attempts,
@@ -338,7 +342,7 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
             )
             fact_ownership_audit = _fact_ownership_audit(
                 actor_result["generated_message"], latest_partner,
-                point["context_turns"], point["speaker"]
+                point["context_turns"], point["speaker"], self_domain
             )
             if fact_ownership_audit["warning"]:
                 raise ValueError(
@@ -517,6 +521,14 @@ def actor_structure_audit(
     units = turn_plan["turn_units"]
     expected_questions = sum(unit["act"] in QUESTION_ACTS for unit in units)
     observed_questions = _information_question_count(message)
+    compound_questions = sum(
+        bool(re.search(
+            r"\band\s+(?:if|whether|what|where|when|why|how|who|do|does|did|is|are|has|have|can|could|would|will)\b",
+            bubble,
+            flags=re.I,
+        ))
+        for bubble in bubbles if "?" in bubble
+    )
     role_label = bool(re.match(
         rf"^(?:{re.escape(speaker)}|assistant|speaker|target|response|message)\s*:",
         message.strip(),
@@ -531,6 +543,10 @@ def actor_structure_audit(
         blocking_errors.append(
             f"expected {expected_questions} information questions, found {observed_questions}"
         )
+    if compound_questions:
+        blocking_errors.append(
+            f"found {compound_questions} question bubbles combining multiple information slots"
+        )
     if role_label:
         blocking_errors.append("output contains a role or speaker label")
     return {
@@ -540,6 +556,7 @@ def actor_structure_audit(
         "planned_information_questions": expected_questions,
         "observed_information_questions": observed_questions,
         "question_permission_match": observed_questions == expected_questions,
+        "compound_question_bubbles": compound_questions,
         "role_label_leak": role_label,
         "character_count": len(message),
         "length_band": turn_plan["length_band"],
@@ -553,6 +570,7 @@ def _fact_ownership_audit(
     latest_partner: dict[str, Any] | None,
     context_turns: list[dict[str, Any]],
     speaker: str,
+    self_domain: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if latest_partner is None:
         return {"status": "no-latest-partner-turn", "warning": False}
@@ -561,7 +579,8 @@ def _fact_ownership_audit(
         str(turn["content"]) for turn in context_turns
         if turn["speaker"].casefold() == speaker.casefold()
     )
-    prior_tokens = _distinctive_tokens(previous_target)
+    stable_self = _json(self_domain) if self_domain else ""
+    prior_tokens = _distinctive_tokens(previous_target + " " + stable_self)
     suspicious_clauses = []
     for clause in re.split(r"(?:[.!]+|\n+)", message):
         clause = clause.strip()
@@ -599,6 +618,18 @@ def _distinctive_tokens(text: str) -> set[str]:
     return {
         token for token in re.findall(r"[a-z][a-z'-]{3,}", text.casefold())
         if token not in stop
+    }
+
+
+def _v15_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:
+    """Project the frozen domain to identity and expression fields visible to V15 Actor."""
+    return {
+        "identity_context": self_domain["identity_context"],
+        "communication_signature": self_domain["communication_signature"],
+        "interaction_policy_prior": self_domain["interaction_policy_prior"],
+        "affective_social_signature": self_domain["affective_social_signature"],
+        "boundaries_and_uncertainty": self_domain["boundaries_and_uncertainty"],
+        "observable_statistics": self_domain["observable_statistics"],
     }
 
 

@@ -275,6 +275,14 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             raise ValueError(
                 f"question act {act!r} content_slot must describe exactly one information question"
             )
+        if act in QUESTION_ACTS and re.search(
+            r"\band\s+(?:if|whether|what|where|when|why|how|who|do|does|did|is|are|has|have|can|could|would|will)\b",
+            content_slot,
+            flags=re.I,
+        ):
+            raise ValueError(
+                f"question act {act!r} content_slot combines multiple information questions"
+            )
         if act not in QUESTION_ACTS and _describes_information_question(content_slot):
             raise ValueError(
                 f"non-question act {act!r} content_slot must not describe an information question; "

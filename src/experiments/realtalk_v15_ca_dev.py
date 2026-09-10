@@ -28,7 +28,6 @@ from .realtalk_ours import (
     USER_DOMAIN_SYSTEM_PROMPT,
     USER_DOMAIN_USER_TEMPLATE,
     _backend_from_env,
-    _behavioral_self_domain,
     _checkpoint_unresolved,
     _failure,
     _json,
@@ -70,12 +69,13 @@ from .realtalk_v15 import (
     aggregate_v15_diagnostics,
     build_v15_activation_whitelist,
     resolve_v15_profile_activation,
+    _v15_actor_self_domain,
     _v15_activation_whitelist_text,
 )
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
-PROTOCOL = "realtalk_task1_ours_v15_2_ca_internal_development"
+PROTOCOL = "realtalk_task1_ours_v15_3_ca_internal_development"
 GATES = (6, 30)
 
 CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)
@@ -304,7 +304,7 @@ def run_v15_ca_dev(
                 result_id=f"ca_dev:{result_id}",
                 speaker=speaker,
                 history=_turns_with_session_boundaries(point["context_turns"]),
-                self_domain=_behavioral_self_domain(self_domains[speaker]),
+                self_domain=_v15_actor_self_domain(self_domains[speaker]),
                 turn_plan=decision["turn_plan"],
                 raw_audit=raw_audit,
                 max_attempts=config.operation_max_attempts,
