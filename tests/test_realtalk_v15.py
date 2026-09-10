@@ -19,6 +19,7 @@ from src.experiments.realtalk_v15 import (
     actor_structure_audit,
     build_v15_activation_whitelist,
     _fact_ownership_audit,
+    _ownership_risk_hints,
     _target_owned_history_text,
     _v15_actor_self_domain,
     resolve_v15_profile_activation,
@@ -443,6 +444,48 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("I live in LA.", rendered)
         self.assertNotIn("I live in NYC.", rendered)
         self.assertIn("target_owned_history", CONTROLLER_USER_TEMPLATE)
+        self.assertIn("ownership_risk_hints", CONTROLLER_USER_TEMPLATE)
+
+    def test_ownership_risk_hints_are_general_and_respect_target_evidence(self):
+        context = [
+            {
+                "turn_id": "session_1:turn_0",
+                "session_id": "session_1",
+                "speaker": "Target",
+                "content": "I study at NYU and have a home office.",
+            },
+            {
+                "turn_id": "session_1:turn_1",
+                "session_id": "session_1",
+                "speaker": "Target",
+                "content": "It has been chilly lately.",
+            },
+        ]
+        location = _ownership_risk_hints(
+            {"content": "I moved to New York and I am enjoying the adjustment."},
+            context,
+            "Target",
+            _self_domain(),
+        )
+        self.assertIn("york", location["partner_only_terms"])
+        self.assertIn("adjustment", location["partner_only_terms"])
+
+        relation = _ownership_risk_hints(
+            {"content": "My office has been freezing all week."},
+            context,
+            "Target",
+            _self_domain(),
+        )
+        self.assertIn("freezing", relation["partner_only_terms"])
+        self.assertTrue(any("office" in pair for pair in relation["unsupported_partner_relations"]))
+
+        supported = _ownership_risk_hints(
+            {"content": "It has been chilly here too."},
+            context,
+            "Target",
+            _self_domain(),
+        )
+        self.assertNotIn("chilly", supported["partner_only_terms"])
 
     def test_prompts_do_not_backdate_new_partner_suggestions(self):
         controller = CONTROLLER_SYSTEM_PROMPT.casefold()

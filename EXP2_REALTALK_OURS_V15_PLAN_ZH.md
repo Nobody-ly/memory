@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_13_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_14_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -98,6 +98,17 @@ speaker 聚类 bootstrap 10,000 次。AD 指标反向后统一以正值表示 V1
 | Empathy AD | `< 1.24` |
 
 未达到时保存并如实报告，不继续利用同一 519 条调 Prompt。
+
+## 7. V15.14 事实归属修正
+
+V15.13 的 Ca 6/30 均通过，但 Cb Gate 6 仍有一条 Controller 把伙伴的 New York
+近况写成目标人物经历。V15.14 在 Controller 前增加确定性的事实归属风险提示：比较伙伴最新一轮
+与当前点以前的目标人物发言及稳定身份，只列出伙伴独有词项，以及只在伙伴同句出现、未在目标
+证据同句出现的词项关系。该机制不写死地点、天气或具体样本，不新增模型调用，也不读取未来、
+Ground Truth、Judge 或 V9 生成结果；它只提醒 Controller 不要把伙伴事实改写成目标人物自传。
+
+输出后原有事实归属审计继续作为阻断检查。V15.14 必须重新完成 Ca 6、Ca 30 和 Cb 6，不能
+复用 V15.13 的生成结果。
 
 ## 7. V15.1 实施审计记录
 

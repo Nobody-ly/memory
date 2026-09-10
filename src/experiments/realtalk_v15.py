@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_13_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_14_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -156,6 +156,9 @@ REAL CAUSAL HISTORY BEFORE THE TARGET TURN:
 
 VISIBLE TARGET-OWNED Cb STATEMENTS BEFORE THIS TURN:
 {target_owned_history}
+
+DETERMINISTIC OWNERSHIP RISK HINTS FROM THE LATEST PARTNER TURN:
+{ownership_risk_hints}
 
 LATEST PARTNER TURN IN THE CURRENT SESSION:
 {latest_partner_turn}
@@ -334,6 +337,12 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                     target_owned_history=_target_owned_history_text(
                         point["context_turns"], point["speaker"]
                     ),
+                    ownership_risk_hints=_json(_ownership_risk_hints(
+                        latest_partner,
+                        point["context_turns"],
+                        point["speaker"],
+                        self_domain,
+                    )),
                     latest_partner_turn=(
                         _turns_with_session_boundaries([latest_partner])
                         if latest_partner else "NONE"
@@ -782,6 +791,63 @@ def _target_owned_history_text(
         _turns_with_session_boundaries(target_turns)
         if target_turns else "NONE: the target has not spoken in visible Cb history yet."
     )
+
+
+def _ownership_risk_hints(
+    latest_partner: dict[str, Any] | None,
+    context_turns: list[dict[str, Any]],
+    speaker: str,
+    self_domain: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if latest_partner is None:
+        return {
+            "unsupported_partner_concepts": [],
+            "unsupported_partner_relations": [],
+            "instruction": "No latest partner turn; do not infer a partner-owned target fact.",
+        }
+    partner_text = str(latest_partner["content"])
+    partner_terms = _distinctive_tokens(partner_text)
+    prior_texts = [
+        str(turn["content"])
+        for turn in context_turns
+        if turn["speaker"].casefold() == speaker.casefold()
+    ]
+    if self_domain:
+        prior_texts.append(_json(self_domain.get("identity_context", {})))
+    prior_term_sets = [_distinctive_tokens(text) for text in prior_texts]
+    supported_terms = set().union(*prior_term_sets) if prior_term_sets else set()
+    partner_only_terms = sorted(partner_terms - supported_terms)
+
+    # Keep relation warnings compact and data-agnostic. A pair means two salient
+    # partner terms co-occur in one clause but never co-occur in one target-owned
+    # turn or stable identity clause. Individual support does not establish a new
+    # autobiographical relation between the two terms.
+    partner_clause_sets = [
+        terms for clause in re.split(r"(?:[.!?]+|\n+)", partner_text)
+        if (terms := _distinctive_tokens(clause))
+    ]
+    prior_clause_sets = [
+        terms for text in prior_texts
+        for clause in re.split(r"(?:[.!?]+|\n+)", text)
+        if (terms := _distinctive_tokens(clause))
+    ]
+    relation_terms = sorted(partner_terms)[:12]
+    unsupported_relations = sorted({
+        "+".join(sorted(pair))
+        for pair in _concept_pairs(set(relation_terms))
+        if any(pair.issubset(clause) for clause in partner_clause_sets)
+        and not any(pair.issubset(clause) for clause in prior_clause_sets)
+    })[:24]
+    return {
+        "partner_only_terms": partner_only_terms[:20],
+        "unsupported_partner_relations": unsupported_relations,
+        "instruction": (
+            "These lexical hints are conservative ownership warnings, not semantic facts or "
+            "a ban on discussing the topic. The target may respond to them, but must not adopt "
+            "them as target autobiography. A relation remains unsupported when its terms only "
+            "appeared separately in target-owned evidence."
+        ),
+    }
 
 
 def _v15_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:

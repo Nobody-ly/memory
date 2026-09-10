@@ -65,6 +65,7 @@ from .realtalk_v15 import (
     CONTROLLER_USER_TEMPLATE,
     MODEL,
     _fact_ownership_audit,
+    _ownership_risk_hints,
     _prompt_hashes,
     _run_actor_with_contract_retries,
     _target_owned_history_text,
@@ -77,7 +78,7 @@ from .realtalk_v15 import (
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
-PROTOCOL = "realtalk_task1_ours_v15_13_ca_internal_development"
+PROTOCOL = "realtalk_task1_ours_v15_14_ca_internal_development"
 GATES = (6, 30)
 
 CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)
@@ -282,6 +283,12 @@ def run_v15_ca_dev(
                     target_owned_history=_target_owned_history_text(
                         point["context_turns"], speaker
                     ),
+                    ownership_risk_hints=_json(_ownership_risk_hints(
+                        latest_partner,
+                        point["context_turns"],
+                        speaker,
+                        self_domains[speaker],
+                    )),
                     latest_partner_turn=(
                         _turns_with_session_boundaries([latest_partner])
                         if latest_partner else "NONE"
