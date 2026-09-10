@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_3"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_4"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -106,6 +106,8 @@ Return the updated complete five-layer partner model. Every evidence ID must be 
 whitelist. Preserve well-supported prior facts when they remain consistent."""
 
 DECISION_SYSTEM_PROMPT = """You are the private understanding and alignment step for persona simulation.
+This is a next-utterance prediction task, not a relationship-improvement or conversation-maximization
+task. Infer the single most probable turn this observed person would actually produce at this exact point.
 Understand the current exchange as the target person. Use the reference conversation as evidence of the
 target's identity and voice, and the current conversation as the reality of this particular relationship.
 Distinguish the target person's current context, the partner's current state, and their shared interaction.
@@ -118,8 +120,13 @@ profile confidence, reward, or quota, and no value range is preferred.
 
 Produce one concise conversational intention. It may naturally involve more than one conversational
 component, but it is not a bubble-by-bubble script, reply draft, question quota, reflection permission, or
-evaluation plan. An asynchronous conversation can continue an earlier thread rather than mechanically
-answering the latest sentence. Return only the strict JSON schema and do not reconstruct a reference answer."""
+evaluation plan. A plausible turn does not need to ask a question, interpret emotion, praise the partner,
+share a personal update, or keep the exchange going. Select any such component only when the target's
+observed behavior and the immediate conversational obligation make it more likely than a shorter ordinary
+reply. Treat old activities, plans and feelings as background rather than the target's current state unless
+the current session confirms them. An asynchronous conversation can continue an earlier thread rather than
+mechanically answering the latest sentence. Return only the strict JSON schema and do not reconstruct a
+reference answer."""
 
 DECISION_FORMAL_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -171,7 +178,10 @@ empty; otherwise copy only visible IDs."""
 ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
 Use the reference conversation and private Self Domain to inhabit this person, and the current
 conversation to understand this particular exchange. Carry the private conversational intention into a
-natural next turn. Output only the message, not the speaker name."""
+natural next turn. Predict the person's most likely actual message rather than making the conversation
+deeper, warmer, longer, or easier to continue. Do not add a question, emotional interpretation, praise,
+personal update, or extra topic unless the private intention calls for it. An ordinary short response is
+valid when it best matches the person and this position. Output only the message, not the speaker name."""
 
 ACTOR_FORMAL_TEMPLATE = """REFERENCE CONVERSATION WITH {reference_partner} ({reference_scope}):
 {reference_history}
@@ -220,6 +230,7 @@ class EvidenceConditionedConfig:
     fresh: bool = False
     resume: bool = False
     preflight_only: bool = False
+    profile_source_dir: str | None = None
 
 
 def _json(value: Any) -> str:
@@ -252,6 +263,75 @@ def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
         handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _load_profile_source(
+    source_dir: Path,
+    prepared: list[dict[str, Any]],
+    selected_speakers: set[str],
+    dataset_manifest: dict[str, Any],
+    mode: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, Any]]], dict[str, Any]]:
+    manifest_path = source_dir / "manifest.json"
+    self_path = source_dir / "self_domains.json"
+    user_path = source_dir / "user_domains.json"
+    for path in (manifest_path, self_path, user_path):
+        if not path.is_file():
+            raise ValueError(f"profile source is missing {path.name}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("status") != "generation_complete":
+        raise ValueError("profile source must be generation_complete")
+    if manifest.get("mode") != mode or manifest.get("model") != MODEL:
+        raise ValueError("profile source mode or model does not match")
+    if stable_hash(manifest.get("dataset")) != stable_hash(dataset_manifest):
+        raise ValueError("profile source dataset manifest does not match")
+
+    raw_self = json.loads(self_path.read_text(encoding="utf-8"))
+    raw_user = json.loads(user_path.read_text(encoding="utf-8"))
+    self_domains: dict[str, dict[str, Any]] = {}
+    user_domains: dict[str, dict[str, dict[str, Any]]] = {}
+    items = {item["speaker"]: item for item in prepared if item["speaker"] in selected_speakers}
+    for speaker in sorted(selected_speakers):
+        if speaker not in raw_self or speaker not in raw_user or speaker not in items:
+            raise ValueError(f"profile source is missing selected speaker {speaker!r}")
+        item = items[speaker]
+        self_domains[speaker] = validate_evidence_ids(
+            normalize_self_domain(raw_self[speaker]),
+            evidence_ids(item["reference_turns"], speaker),
+        )
+        allowed_partner_ids: set[str] = set()
+        user_domains[speaker] = {}
+        by_session = {
+            session_id: [
+                turn for turn in item["current_turns"]
+                if turn["session_id"] == session_id
+            ]
+            for session_id in ("session_1", "session_2", "session_3")
+        }
+        for session_index, session_id in enumerate(
+            ("session_1", "session_2", "session_3"), start=1
+        ):
+            if session_id not in raw_user[speaker]:
+                raise ValueError(
+                    f"profile source is missing {speaker!r} {session_id!r}"
+                )
+            if session_index > 1:
+                completed = by_session[f"session_{session_index - 1}"]
+                allowed_partner_ids |= evidence_ids(completed, item["partner"])
+            user_domains[speaker][session_id] = validate_evidence_ids(
+                normalize_user_domain(raw_user[speaker][session_id]),
+                allowed_partner_ids,
+            )
+
+    metadata = {
+        "source_protocol": manifest.get("protocol"),
+        "source_run_signature": manifest.get("run_signature"),
+        "self_domains_sha256": hashlib.sha256(self_path.read_bytes()).hexdigest(),
+        "user_domains_sha256": hashlib.sha256(user_path.read_bytes()).hexdigest(),
+        "selected_speakers": sorted(selected_speakers),
+    }
+    return self_domains, user_domains, metadata
 
 
 def format_evidence_turns(turns: Iterable[dict[str, Any]]) -> str:
@@ -648,6 +728,18 @@ def _run_impl(
     }
     selected_speakers = {index[result_id][0]["speaker"] for result_id in selected_ids}
 
+    reused_self_domains: dict[str, dict[str, Any]] = {}
+    reused_user_domains: dict[str, dict[str, dict[str, Any]]] = {}
+    profile_source: dict[str, Any] | None = None
+    if config.profile_source_dir:
+        reused_self_domains, reused_user_domains, profile_source = _load_profile_source(
+            Path(config.profile_source_dir).resolve(),
+            prepared,
+            selected_speakers,
+            dataset_manifest,
+            config.mode,
+        )
+
     backend = backend or _backend_from_env(config.model)
     if backend.model != config.model:
         raise ValueError(f"model mismatch: expected {config.model!r}, got {backend.model!r}")
@@ -660,6 +752,8 @@ def _run_impl(
         "prompt_hashes": prompt_hashes(), "schema_hashes": schema_hashes(),
         "implementation_commit": _repository_commit(),
         "legacy_self_user_decision_reused": False,
+        "self_user_domains_reused": profile_source is not None,
+        "profile_source": profile_source,
         "generated_outputs_rolled_into_history": False,
         "semantic_verification_or_candidate_search": False,
         "omega_enabled": False, "future_user_state_enabled": False,
@@ -673,7 +767,10 @@ def _run_impl(
         "manifest": signature_manifest,
         "config": {
             key: value for key, value in asdict(config).items()
-            if key not in {"output_dir", "fresh", "resume", "preflight_only", "gate"}
+            if key not in {
+                "output_dir", "fresh", "resume", "preflight_only", "gate",
+                "profile_source_dir",
+            }
         },
     })
     checkpoint = OperationCheckpoint(output_dir / "checkpoint.json", signature)
@@ -687,6 +784,10 @@ def _run_impl(
     for item in prepared:
         speaker = item["speaker"]
         if speaker not in selected_speakers:
+            continue
+        if profile_source is not None:
+            self_domains[speaker] = reused_self_domains[speaker]
+            user_domains[speaker] = reused_user_domains[speaker]
             continue
         target_ids = evidence_ids(item["reference_turns"], speaker)
         self_result = _structured_call(
@@ -946,11 +1047,13 @@ def main() -> None:
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--profile-source-dir")
     args = parser.parse_args()
     result = run(EvidenceConditionedConfig(
         dataset_dir=args.dataset_dir, output_dir=args.output_dir,
         mode=args.mode, gate=args.gate, model=args.model,
         fresh=args.fresh, resume=args.resume, preflight_only=args.preflight_only,
+        profile_source_dir=args.profile_source_dir,
     ))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

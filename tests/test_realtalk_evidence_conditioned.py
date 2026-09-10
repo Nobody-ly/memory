@@ -341,9 +341,45 @@ class EvidencePipelineTests(unittest.TestCase):
             self.assertEqual(unresolved[0]["operation_key"], "self:emi")
             self.assertFalse((output / "GENERATION_COMPLETE").exists())
 
+    def test_profile_source_reuses_validated_domains_without_model_calls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            run(EvidenceConditionedConfig(
+                dataset_dir=str(DATASET), output_dir=str(source),
+                mode="ca-dev", gate=6, fresh=True,
+            ), FakeBackend())
+
+            backend = FakeBackend()
+            output = Path(temporary) / "replay"
+            result = run(EvidenceConditionedConfig(
+                dataset_dir=str(DATASET), output_dir=str(output),
+                mode="ca-dev", gate=6, fresh=True,
+                profile_source_dir=str(source),
+            ), backend)
+            self.assertEqual(result["status"], "generation_complete")
+            self.assertTrue(result["manifest"]["self_user_domains_reused"])
+            self.assertEqual(
+                result["manifest"]["profile_source"]["source_run_signature"],
+                json.loads((source / "manifest.json").read_text(encoding="utf-8"))["run_signature"],
+            )
+            self.assertEqual(sum(
+                call["schema"] == SELF_DOMAIN_SCHEMA["name"]
+                for call in backend.calls
+            ), 0)
+            self.assertEqual(sum(
+                call["schema"] == USER_DOMAIN_SCHEMA["name"]
+                for call in backend.calls
+            ), 0)
+            self.assertEqual(sum(
+                call["schema"] == DECISION_SCHEMA["name"]
+                for call in backend.calls
+            ), 6)
+
     def test_actor_prompt_is_identity_driven_and_metric_free(self):
         system = ACTOR_SYSTEM_TEMPLATE.format(speaker="Emi")
         self.assertIn("You are Emi", system)
+        self.assertIn("next-utterance prediction task", DECISION_SYSTEM_PROMPT)
+        self.assertIn("most likely actual message", system)
         for forbidden in ("Reflectiveness", "Grounding", "Intimacy", "Empathy"):
             self.assertNotIn(forbidden, system)
             self.assertNotIn(forbidden, DECISION_SYSTEM_PROMPT)
