@@ -851,6 +851,8 @@ def _structured_call(
             "completion_tokens": result.completion_tokens,
             "latency_seconds": result.latency_seconds,
             "network_attempts": result.attempts,
+            "finish_reason": result.finish_reason,
+            "response_id": result.response_id,
             "recorded_at_utc": _now(),
         })
         try:
@@ -872,6 +874,8 @@ def _structured_call(
                 "schema": schema["name"],
                 "thinking_enabled": enable_thinking,
                 "reasoning_sha256": stable_hash(result.reasoning_content),
+                "finish_reason": result.finish_reason,
+                "response_id": result.response_id,
             },
         }
 
@@ -959,6 +963,8 @@ def _text_call(
             "completion_tokens": result.completion_tokens,
             "latency_seconds": result.latency_seconds,
             "network_attempts": result.attempts,
+            "finish_reason": result.finish_reason,
+            "response_id": result.response_id,
             "recorded_at_utc": _now(),
         })
         return {
@@ -972,6 +978,8 @@ def _text_call(
                 "latency_seconds_last_call": result.latency_seconds,
                 "thinking_enabled": enable_thinking,
                 "reasoning_sha256": stable_hash(result.reasoning_content),
+                "finish_reason": result.finish_reason,
+                "response_id": result.response_id,
             },
         }
 

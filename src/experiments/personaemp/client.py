@@ -17,6 +17,8 @@ class ChatResult:
     latency_seconds: float
     attempts: int
     reasoning_content: str = ""
+    finish_reason: str = ""
+    response_id: str = ""
 
 
 class ChatBackend(Protocol):
@@ -282,6 +284,10 @@ class OpenAICompatibleChatBackend:
                     latency_seconds=round(time.perf_counter() - started, 4),
                     attempts=attempt,
                     reasoning_content=reasoning_content,
+                    finish_reason=str(
+                        getattr(response.choices[0], "finish_reason", "") or ""
+                    ),
+                    response_id=str(getattr(response, "id", "") or ""),
                 )
                 self.token_usage["prompt_tokens"] += result.prompt_tokens
                 self.token_usage["completion_tokens"] += result.completion_tokens
