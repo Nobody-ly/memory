@@ -87,3 +87,32 @@ Self 不再截断，但 6 人均填满各 section 的数量上限，说明它仍
   `/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-evidence-v1-2-ca-dev6-eae8b72`
 
 这些目录均不得合并或覆盖；后续只从 V1.3 的提交、Prompt/Schema 哈希和新目录继续。
+
+## 6. Appendix C Judge 与本地五项结果
+
+评价目录：
+
+`/amax/xidian_ty/Ly/personaemp-exp2/runs/realtalk-evidence-ca-dev6-paired-eval-9e6e675`
+
+`gpt-4o-mini` 使用 `realtalk_appendix_c_full_prompt_within_session_v3`，V1.3 完成 36/36 个
+判断；V1 复用完全相同的 18 个 Ground Truth 判断，只新增 18 个候选判断。两版均为零错误。
+本地五项使用固定 CardiffNLP 分类器与 BERTScore `roberta-large` 第 17 层标准英文配置。
+
+| Method | ROUGE-L | BERTScore | Reflect. | Grounding | Sentiment | Emotion | Intimacy AD | Empathy AD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| REALTALK w/o FT（论文全量） | 0.14 | 0.76 | 0.62 | 0.40 | 0.53 | 0.43 | 0.06 | 1.80 |
+| REALTALK w/ FT（论文全量） | 0.14 | 0.78 | 0.77 | 0.62 | 0.59 | 0.46 | 0.07 | 1.24 |
+| Evidence V1（Ca dev6） | 0.1060 | 0.8366 | 0.6667 | 0.1667 | 0.8333 | 0.6667 | 0.1029 | 1.6667 |
+| Evidence V1.3（Ca dev6） | 0.1233 | 0.8482 | 0.6667 | 0.3333 | 1.0000 | 0.6667 | 0.0885 | 1.6667 |
+
+方向为 ROUGE/BERTScore/Reflectiveness/Grounding/Sentiment/Emotion 越高越好，两个 AD 越低越好。
+V1.3 相对同样本 V1：ROUGE +0.0173、BERTScore +0.0116、Grounding +0.1667、Sentiment
++0.1667、Intimacy AD 改善 0.0144；其余三项持平，没有指标变差。
+
+但 V1.3 不能据此宣称超过论文。它低于论文逐列最优的项目为 ROUGE、Reflectiveness、
+Grounding、Intimacy AD、Empathy AD。论文两行是完整实验摘要，而本轮是 6 位人物各一条，
+两者不能作统计上的直接比较。
+
+逐样本标签揭示：6 条真值均为非 Reflective，只有 2 条真值为 Grounding；V1.3 的 6 条候选
+全部被判为 Grounding，因此 2 条命中、4 条是假阳性。当前问题不是缺少追问，而是普遍追加问题。
+Empathy 真值有 5/6 为 0，V1.3 在 Emi、Nebraas、Muhhamed 三条上被判为 3，仍有过度响应倾向。
