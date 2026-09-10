@@ -231,6 +231,8 @@ class EvidenceConditionedConfig:
     resume: bool = False
     preflight_only: bool = False
     profile_source_dir: str | None = None
+    contiguous_start: int | None = None
+    contiguous_count: int | None = None
 
 
 def _json(value: Any) -> str:
@@ -255,6 +257,29 @@ def _write_jsonl(path: Path, values: Iterable[dict[str, Any]]) -> None:
         for value in values:
             handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
     os.replace(temporary, path)
+
+
+def select_result_ids(
+    gate_manifests: dict[str, list[str]],
+    gate: int,
+    mode: str,
+    contiguous_start: int | None,
+    contiguous_count: int | None,
+) -> list[str]:
+    selected = list(gate_manifests[str(gate)])
+    if contiguous_start is None and contiguous_count is None:
+        return selected
+    if contiguous_start is None or contiguous_count is None:
+        raise ValueError("contiguous_start and contiguous_count must be set together")
+    if mode != "cb" or gate != EXPECTED_FORMAL_TARGETS:
+        raise ValueError("contiguous selection requires cb mode with gate 519")
+    if contiguous_start < 1 or contiguous_count < 1:
+        raise ValueError("contiguous selection values must be positive")
+    begin = contiguous_start - 1
+    end = begin + contiguous_count
+    if end > len(selected):
+        raise ValueError("contiguous selection exceeds the canonical result order")
+    return selected[begin:end]
 
 
 def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
@@ -721,7 +746,13 @@ def _run_impl(
         if config.mode == "ca-dev" else prepare_formal_cb(config.dataset_dir)
     )
     gate_manifests = build_gate_manifests(prepared, config.mode)
-    selected_ids = gate_manifests[str(config.gate)]
+    selected_ids = select_result_ids(
+        gate_manifests,
+        config.gate,
+        config.mode,
+        config.contiguous_start,
+        config.contiguous_count,
+    )
     index = {
         point["result_id"]: (item, point)
         for item in prepared for point in item["points"]
@@ -749,6 +780,12 @@ def _run_impl(
         "model": config.model, "thinking_enabled_all_stages": False,
         "dataset": dataset_manifest, "gate_manifests": gate_manifests,
         "selected_ids_sha256": stable_hash(selected_ids),
+        "selection": {
+            "kind": "contiguous_canonical_window"
+            if config.contiguous_start is not None else "gate",
+            "canonical_one_based_start": config.contiguous_start,
+            "count": config.contiguous_count,
+        },
         "prompt_hashes": prompt_hashes(), "schema_hashes": schema_hashes(),
         "implementation_commit": _repository_commit(),
         "legacy_self_user_decision_reused": False,
@@ -1048,12 +1085,16 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--profile-source-dir")
+    parser.add_argument("--contiguous-start", type=int)
+    parser.add_argument("--contiguous-count", type=int)
     args = parser.parse_args()
     result = run(EvidenceConditionedConfig(
         dataset_dir=args.dataset_dir, output_dir=args.output_dir,
         mode=args.mode, gate=args.gate, model=args.model,
         fresh=args.fresh, resume=args.resume, preflight_only=args.preflight_only,
         profile_source_dir=args.profile_source_dir,
+        contiguous_start=args.contiguous_start,
+        contiguous_count=args.contiguous_count,
     ))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

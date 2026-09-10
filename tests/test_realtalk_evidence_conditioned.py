@@ -19,6 +19,7 @@ from src.experiments.realtalk_evidence_conditioned import (
     prepare_ca_dev,
     prepare_formal_cb,
     run,
+    select_result_ids,
     tag_source,
 )
 from src.experiments.realtalk_evidence_schemas import (
@@ -224,6 +225,19 @@ class EvidenceDataTests(unittest.TestCase):
         self.assertEqual({key: len(value) for key, value in formal.items()}, {"10": 10, "30": 30, "90": 90, "519": 519})
         self.assertLessEqual(set(dev["6"]), set(dev["24"]))
         self.assertLessEqual(set(formal["30"]), set(formal["90"]))
+
+    def test_contiguous_window_matches_the_frozen_v9_hard_segment(self):
+        formal = build_gate_manifests(self.formal, "cb")
+        selected = select_result_ids(formal, 519, "cb", 373, 60)
+        self.assertEqual(len(selected), 60)
+        self.assertEqual(selected[0], "cb:Vanessa:session_2:turn_15")
+        self.assertEqual(selected[5], "cb:Vanessa:session_2:turn_25")
+        self.assertEqual(selected[34], "cb:Vanessa:session_3:turn_4")
+        self.assertEqual(selected[-1], "cb:Vanessa:session_3:turn_54")
+        self.assertTrue(all(result_id.startswith("cb:Vanessa:") for result_id in selected))
+
+        with self.assertRaisesRegex(ValueError, "requires cb mode"):
+            select_result_ids(build_gate_manifests(self.dev, "ca-dev"), 68, "ca-dev", 1, 6)
 
     def test_prompts_do_not_receive_target_or_future_and_dev_text_is_not_duplicated(self):
         item = self.dev[0]
