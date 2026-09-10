@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_10_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_11_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -227,3 +227,14 @@ V15.9 Ca Gate 6 把 `I haven't watched ... but I've heard good things` 中的 `I
 错误匹配为 `I have`，进而误判为倒签经历。V15.10 将倒签信号限定为 `already/before/used to/
 for a while`，或“以前考虑、计划、开始、做过、尝试、拥有”等明确动词。否定观看经历和“听说
 口碑不错”不再被当作伙伴事实迁移，真正的历史倒签仍阻断。协议标识同步升级并重跑 Ca Gate 6。
+
+### V15.11 赞美义务与计划内容一致性
+
+V15.10 Ca Gate 6 暴露两个不同问题：Emi 合法地回答自己也喜欢科幻电影，却被通用 `also`
+重合规则误报；Muhhamed 虽被正确分类为结尾赞美和 `acknowledge`，但 acknowledge 的自由
+`content_slot` 仍回答了更早的问题并声称“以前想过”。
+
+V15.11 删除通用主题词的 `too/also` 阻断，只保留所有权敏感概念、关系组合和明确倒签检测。
+同时在 Decision 归一化后强制：`praise-or-encouragement + acknowledge` 只能规划 acknowledge
+单元，且内容不得虚构此前已经考虑或计划过伙伴刚提出的建议。违反时由同一次结构化调用的既有
+重试机制修复，不增加新模型阶段。协议标识同步升级并从 Ca Gate 6 重跑。

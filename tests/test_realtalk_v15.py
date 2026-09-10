@@ -426,6 +426,14 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertFalse(negative_experience["warning"])
 
+        aligned_preference = _fact_ownership_audit(
+            "I also love science fiction and fantasy movies.",
+            {"content": "I love science fiction and fantasy movies."},
+            [],
+            "Target",
+        )
+        self.assertFalse(aligned_preference["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},
@@ -451,7 +459,18 @@ class RealTalkV15Tests(unittest.TestCase):
         decision = _decision()
         decision["situation"]["partner_act"] = "praise-or-encouragement"
         decision["situation"]["conversational_obligation"] = "acknowledge"
+        decision["turn_plan"]["turn_units"] = [{
+            "act": "acknowledge",
+            "content_slot": "Thanks, I appreciate that.",
+            "question_target": "",
+        }]
         normalize_v15_decision(decision)
+
+        decision["turn_plan"]["turn_units"][0]["content_slot"] = (
+            "Yeah, I've thought about it before. Thanks, I appreciate that."
+        )
+        with self.assertRaisesRegex(ValueError, "must not answer an earlier suggestion"):
+            normalize_v15_decision(decision)
 
     def test_v15_actor_self_domain_includes_identity_and_boundaries(self):
         projected = _v15_actor_self_domain(_self_domain())

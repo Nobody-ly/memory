@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_10_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_11_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -643,7 +643,7 @@ def _fact_ownership_audit(
         ))
         backdated_claim = _has_backdated_claim_language(clause)
         if (
-            (len(overlap) >= 2 and (explicit_mirroring or backdated_claim))
+            (len(overlap) >= 2 and backdated_claim)
             or unsupported_concepts
             or mirrored_pairs
         ):

@@ -297,14 +297,27 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             "question_target": target,
         })
 
+    partner_act = _enum(situation["partner_act"], PARTNER_ACTS, "situation.partner_act")
+    obligation = _enum(
+        situation["conversational_obligation"],
+        CONVERSATIONAL_OBLIGATIONS,
+        "situation.conversational_obligation",
+    )
+    if partner_act == "praise-or-encouragement" and obligation == "acknowledge":
+        if any(unit["act"] != "acknowledge" for unit in normalized_units):
+            raise ValueError(
+                "closing praise with acknowledge obligation permits only acknowledge turn units"
+            )
+        if any(_backdates_praise_suggestion(unit["content_slot"]) for unit in normalized_units):
+            raise ValueError(
+                "closing-praise acknowledgement must not answer an earlier suggestion by inventing "
+                "prior consideration or plans"
+            )
+
     return {
         "situation": {
-            "partner_act": _enum(situation["partner_act"], PARTNER_ACTS, "situation.partner_act"),
-            "conversational_obligation": _enum(
-                situation["conversational_obligation"],
-                CONVERSATIONAL_OBLIGATIONS,
-                "situation.conversational_obligation",
-            ),
+            "partner_act": partner_act,
+            "conversational_obligation": obligation,
             "topic": _text(situation["topic"], "situation.topic", allow_empty=True),
             "uncertainty": _enum(
                 situation["uncertainty"], ("low", "medium", "high"), "situation.uncertainty"
@@ -345,6 +358,21 @@ def _describes_information_question(value: str) -> bool:
         return True
     first = lowered.split(maxsplit=1)[0] if lowered else ""
     return first in QUESTION_WORDS
+
+
+def _backdates_praise_suggestion(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:i've|i\s+have)\s+(?:already\s+)?(?:thought\s+about|considered|"
+            r"planned|been\s+planning|started|tried)\b",
+            value,
+            re.I,
+        )
+        or (
+            re.search(r"\b(?:before|for\s+a\s+while|already)\b", value, re.I)
+            and re.search(r"\b(?:think|thought|consider|plan|start|try)\b", value, re.I)
+        )
+    )
 
 
 def _exact_object(value: Any, schema: dict[str, Any], path: str) -> dict[str, Any]:
