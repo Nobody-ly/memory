@@ -289,7 +289,7 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertIn('session_1:turn_2', rendered)
 
-    def test_adaptive_alignment_names_affected_dimension(self):
+    def test_lambda_trace_names_only_dimensions_it_changes(self):
         invalid = _decision()
         invalid["alignment"]["affected_dimensions"] = []
         with self.assertRaisesRegex(ValueError, "requires at least one"):
@@ -297,8 +297,13 @@ class RealTalkV15Tests(unittest.TestCase):
 
         invalid = _decision()
         invalid["alignment"]["lambda_trace"] = 0
-        with self.assertRaisesRegex(ValueError, "requires nonzero"):
+        with self.assertRaisesRegex(ValueError, "requires no affected"):
             normalize_v15_decision(invalid)
+
+        aligned = _decision()
+        aligned["alignment"]["lambda_trace"] = 0
+        aligned["alignment"]["affected_dimensions"] = []
+        normalize_v15_decision(aligned)
 
     def test_fact_ownership_audit_checks_first_person_statements_not_questions(self):
         latest = {"content": "It is cold here and I am heading out to work."}

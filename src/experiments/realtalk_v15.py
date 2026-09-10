@@ -49,7 +49,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_1_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_2_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -106,10 +106,11 @@ use follow-up-question or reciprocal-question instead.
 Choose disclosure depth, relationship register, length, and tone from the target's observed behavior and the
 current relationship. lambda_trace records how strongly partner-facing evidence changes this turn relative to
 the stable Self prior. It is an audit trace, not a reward. Do not force it into a preset interval. Name the
-source of adaptation and the plan dimensions actually affected; self-led behavior may have no affected
-dimensions. A zero lambda_trace means no partner-driven departure and therefore cannot be labeled balanced or
-partner-adaptive. The effect of adaptation must be visible in the structured plan rather than explained as an
-abstract ideal.
+source of adaptation and the plan dimensions actually affected. Orientation describes the overall stance of
+the turn; it is not a numeric bucket for lambda_trace. A balanced or partner-adaptive turn may still have zero
+departure when the current need already matches the stable Self prior. If lambda_trace is zero, return no
+affected_dimensions. If it is nonzero, name at least one dimension whose change is visible in the structured
+plan rather than explained as an abstract ideal.
 
 Return only the strict schema. Do not mention evaluation metrics or reconstruct any known reference answer."""
 

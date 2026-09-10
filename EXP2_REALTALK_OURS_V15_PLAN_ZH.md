@@ -114,3 +114,19 @@ V15.1 协议升级为 `realtalk_task1_ours_v15_1_cb_posterior_controller`，只�
   明确禁止把伙伴的地点、天气、活动、计划、健康、工作和物品镜像为目标人物当前事实。
 
 V15.1 必须使用新目录并重新从 Ca Gate 6 开始，不能复用原 V15 的 Cb 生成缓存。
+
+### V15.2 lambda 语义修正
+
+V15.1 的 Ca Gate 30 在 29/30 停止：同一 Decision 三次输出
+`partner-adaptive + lambda_trace=0 + affected_dimensions=[]`。原始理由显示，当前伙伴的脆弱披露
+触发了适应性回应，但该回应也完全符合人物稳定 Self prior，因此相对默认行为的偏离量确实可为
+零。此前新增的“非 self-led 必须非零 lambda”并非原计划要求，错误地把离散 orientation 当成
+lambda 数值区间。
+
+V15.2 保持 orientation 表示本轮总体取向，lambda 只表示相对 Self prior 的偏离程度：
+
+- `lambda_trace=0` 时 `affected_dimensions=[]`；
+- `lambda_trace>0` 时至少列出一个实际受影响维度；
+- 不再依据 `self-led|balanced|partner-adaptive` 人为设置 lambda 区间。
+
+事实归属阻断和其余 V15.1 改动保持不变；V15.2 使用新目录重新从 Ca Gate 6 开始。

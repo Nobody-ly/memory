@@ -247,10 +247,10 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
     source = _enum(
         alignment["adaptation_source"], ADAPTATION_SOURCES, "alignment.adaptation_source"
     )
-    if orientation != "self-led" and not normalized_affected:
-        raise ValueError("adaptive alignment requires at least one affected dimension")
-    if orientation != "self-led" and lambda_trace == 0:
-        raise ValueError("balanced or partner-adaptive alignment requires nonzero lambda_trace")
+    if lambda_trace == 0 and normalized_affected:
+        raise ValueError("zero lambda_trace requires no affected dimensions")
+    if lambda_trace > 0 and not normalized_affected:
+        raise ValueError("nonzero lambda_trace requires at least one affected dimension")
     if source == "self-prior" and orientation != "self-led":
         raise ValueError("self-prior adaptation source requires self-led orientation")
 
