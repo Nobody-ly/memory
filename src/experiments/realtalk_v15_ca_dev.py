@@ -75,7 +75,7 @@ from .realtalk_v15 import (
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
-PROTOCOL = "realtalk_task1_ours_v15_3_ca_internal_development"
+PROTOCOL = "realtalk_task1_ours_v15_4_ca_internal_development"
 GATES = (6, 30)
 
 CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)
@@ -272,6 +272,9 @@ def run_v15_ca_dev(
                     speaker=speaker,
                     partner=item["partner"],
                     self_domain=_json(self_domains[speaker]),
+                    target_identity_context=_json(
+                        self_domains[speaker]["identity_context"]
+                    ),
                     user_domain=_json(domain),
                     history=_turns_with_session_boundaries(point["context_turns"]),
                     latest_partner_turn=(

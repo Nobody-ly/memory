@@ -350,6 +350,9 @@ class RealTalkV15Tests(unittest.TestCase):
         projected = _v15_actor_self_domain(_self_domain())
         self.assertIn("identity_context", projected)
         self.assertIn("boundaries_and_uncertainty", projected)
+        self.assertIn("communication_signature", projected)
+        self.assertNotIn("interaction_policy_prior", projected)
+        self.assertNotIn("affective_social_signature", projected)
         self.assertNotIn("user_domain", projected)
 
     def test_user_domain_activation_uses_stable_fact_ids(self):

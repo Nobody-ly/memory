@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_3_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_4_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -124,6 +124,9 @@ CURRENT PARTNER: {partner}
 
 FIXED V9 SELF DOMAIN:
 {self_domain}
+
+AUTHORITATIVE TARGET-OWNED IDENTITY CONTEXT:
+{target_identity_context}
 
 CURRENT FIVE-LAYER USER DOMAIN:
 {user_domain}
@@ -299,7 +302,8 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                 user_prompt=CONTROLLER_USER_TEMPLATE.format(
                     speaker=point["speaker"],
                     partner=speaker_data["partner"],
-                    self_domain=_json(self_domain),
+                self_domain=_json(self_domain),
+                target_identity_context=_json(self_domain["identity_context"]),
                     user_domain=_json(v9["user_domain"]),
                     history=_turns_with_session_boundaries(point["context_turns"]),
                     latest_partner_turn=(
@@ -579,7 +583,7 @@ def _fact_ownership_audit(
         str(turn["content"]) for turn in context_turns
         if turn["speaker"].casefold() == speaker.casefold()
     )
-    stable_self = _json(self_domain) if self_domain else ""
+    stable_self = _json(self_domain.get("identity_context", {})) if self_domain else ""
     prior_tokens = _distinctive_tokens(previous_target + " " + stable_self)
     suspicious_clauses = []
     for clause in re.split(r"(?:[.!]+|\n+)", message):
@@ -626,8 +630,6 @@ def _v15_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:
     return {
         "identity_context": self_domain["identity_context"],
         "communication_signature": self_domain["communication_signature"],
-        "interaction_policy_prior": self_domain["interaction_policy_prior"],
-        "affective_social_signature": self_domain["affective_social_signature"],
         "boundaries_and_uncertainty": self_domain["boundaries_and_uncertainty"],
         "observable_statistics": self_domain["observable_statistics"],
     }

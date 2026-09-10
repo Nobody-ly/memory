@@ -147,3 +147,18 @@ V15.3 因此：
 - 单个 question unit 必须对应一个信息槽，禁止把姓名和来源等两个问题用 `and` 捆绑。
 
 V15.2 的失败 Cb 目录保持不变，V15.3 再次从 Ca Gate 6 开始。
+
+### V15.4 Self Domain 证据边界修正
+
+V15.3 Cb Gate 6 的结构检查通过，但人工复核发现 Self Domain 内部的伙伴示例污染了身份判断：
+Emi 的 `identity_context` 明确记录 Los Angeles，交互策略描述却以伙伴适应 New York 为例；
+Controller/Actor 生成了 Emi 正在适应 New York，审计器又因整份 Self Domain 出现 New York 而误放行。
+
+V15.4 明确分工：
+
+- Controller 仍读取完整 Self Domain，但额外单列权威 `identity_context` 进行问题前提核对；
+- Actor 只读取 `identity_context`、`communication_signature`、稳定边界和可观察统计；动作选择、
+  伙伴适应和情绪策略已经由 turn plan 决定，不再向 Actor 重复披露含伙伴示例的策略描述；
+- 事实归属审计仅将 `identity_context` 视为稳定人物事实，不把行为描述中的伙伴案例当作目标事实。
+
+V15.3 的 Cb Gate 6 保留为失败诊断；V15.4 使用新目录重新运行 Ca Gate 6。
