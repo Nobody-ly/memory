@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_8_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_9_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -211,3 +211,12 @@ V15.8 保持 Controller、Schema 和 Actor Prompt 不变，仅让确定性审计
 第二个第一人称主张的外部观点，以及不含“以前/已经/一段时间”等倒签标记的暂定未来反应。
 对“我早已计划开 YouTube 频道”等倒签陈述仍然阻断。协议和 Ca runner 标识同步升级，并从
 Ca Gate 6 重新验证。
+
+### V15.9 通用词重合误报修正
+
+V15.8 Ca Gate 6 又阻断了 Akib 对外国电影和 Hollywood 的不同个人习惯。该输出围绕伙伴话题
+表达目标人物自己的不同倾向，并没有把伙伴事实据为己有；旧审计仅因两个主题词重合而误报。
+
+V15.9 对地点、天气和工作场所关系等所有权敏感概念保持原有阻断；通用主题词重合只有同时出现
+`too/also/same/as well` 等明确镜像语言时才触发。这样仍会阻断“我这里也很冷”等迁移，但不会
+阻断围绕同一电影话题表达不同观点或习惯。协议标识同步升级，并从 Ca Gate 6 重新验证。

@@ -410,6 +410,14 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertTrue(backdated_suggestion["warning"])
 
+        different_personal_habit = _fact_ownership_audit(
+            "I don't watch a ton of foreign films but I get your point about Hollywood movies.",
+            {"content": "I love foreign films because Hollywood movies feel shallow."},
+            [],
+            "Target",
+        )
+        self.assertFalse(different_personal_habit["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},

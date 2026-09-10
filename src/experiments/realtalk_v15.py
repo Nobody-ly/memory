@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_8_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_9_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -636,12 +636,28 @@ def _fact_ownership_audit(
             if any(pair.issubset(partner) for partner in partner_concept_sets)
             and not any(pair.issubset(prior) for prior in prior_concept_sets)
         )
-        if len(overlap) >= 2 or unsupported_concepts or mirrored_pairs:
+        explicit_mirroring = bool(re.search(
+            r"\b(?:too|also|same|as\s+well|me\s+too|here\s+too)\b",
+            clause,
+            re.I,
+        ))
+        backdated_claim = bool(re.search(
+            r"\b(?:i've|i\s+have|already|before|used\s+to|for\s+a\s+while)\b",
+            clause,
+            re.I,
+        ))
+        if (
+            (len(overlap) >= 2 and (explicit_mirroring or backdated_claim))
+            or unsupported_concepts
+            or mirrored_pairs
+        ):
             suspicious_clauses.append({
                 "clause": clause[:300],
                 "overlap_tokens": overlap[:20],
                 "unsupported_concepts": unsupported_concepts,
                 "mirrored_concept_pairs": mirrored_pairs,
+                "explicit_mirroring_language": explicit_mirroring,
+                "backdated_claim_language": backdated_claim,
             })
     suspicious = sorted({
         token for item in suspicious_clauses for token in item["overlap_tokens"]
