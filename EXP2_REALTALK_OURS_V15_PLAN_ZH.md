@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_16_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_17_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -130,6 +130,14 @@ V15.15 的 Ca Gate 6 通过，Ca Gate 30 在 29/30 停止。唯一失败是审�
 目标人物历史支持。V15.16 只把明确的 `I used to` 识别为过去习惯；`be used to create` 不再
 触发回溯声明。Prompt、Schema、数据、模型和解码参数均不变，新增回归测试后从 Ca Gate 6
 重新验证。
+
+## 10. V15.17 否定归属与问题优先级
+
+V15.16 的 Ca 6/30 均通过；Cb Gate 6 在 5/6 停止。Emi 的 Controller 已不再采用伙伴的
+New York 前提，而是生成否定句 `I'm not living in New York`，被旧审计器误判为正向事实转移。
+V15.17 将明确的第一人称否定声明排除出“采用伙伴事实”告警。与此同时，当合并伙伴消息的早期
+问题前提不受支持、而最后一个问题可以独立回答时，Controller 必须静默略过早期问题，不为纠正
+而主动复述该实体。只有剩余问题无法连贯回答时才纠正前提。该修改不放宽任何正向自传事实。
 
 ## 7. V15.1 实施审计记录
 

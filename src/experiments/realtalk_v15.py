@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_16_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_17_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -91,7 +91,9 @@ own visible Cb statements. If the premise is unsupported or conflicts with targe
 adopt it as fact: answer only the supported part, correct it naturally, or ask one clarification when needed.
 When a merged partner turn contains several questions, do not answer every question mechanically. Prioritize
 the final still-active question and any earlier question whose premise is explicitly supported; omit an
-earlier unsupported-premise question when the later conversational slot can be answered naturally.
+earlier unsupported-premise question when the later conversational slot can be answered naturally. In that
+case, omit it silently: do not mention the unsupported entity merely to correct or deny it. Correct a premise
+only when the remaining active question cannot be answered coherently without the correction.
 
 Do not combine separate target facts into a new autobiographical relation. For example, evidence that the
 target has a home office and separate evidence about cold weather or illness does not support a claim that
@@ -650,6 +652,8 @@ def _fact_ownership_audit(
         )
         if not first_person:
             continue
+        if _is_explicitly_negated_self_claim(clause):
+            continue
         if _is_external_opinion_clause(clause) or _is_tentative_future_reaction(clause):
             continue
         overlap = sorted((_distinctive_tokens(clause) & partner_tokens) - prior_tokens)
@@ -731,6 +735,17 @@ def _is_external_opinion_clause(clause: str) -> bool:
     if remainder == clause:
         return False
     return not bool(re.search(r"\b(?:i|i'm|i've|i'd|i'll|me|my|mine)\b", remainder, re.I))
+
+
+def _is_explicitly_negated_self_claim(clause: str) -> bool:
+    return bool(re.search(
+        r"\b(?:i\s+(?:am|was|do|did|have|had|will|would|can|could)\s+not|"
+        r"i(?:'m|\s+am)\s+not|"
+        r"i\s+(?:don't|didn't|haven't|hadn't|won't|wouldn't|can't|couldn't)|"
+        r"i\s+never|i\s+no\s+longer|my\s+\w+\s+(?:is|was)\s+not)\b",
+        clause,
+        re.I,
+    ))
 
 
 def _is_tentative_future_reaction(clause: str) -> bool:

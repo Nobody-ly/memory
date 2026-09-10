@@ -443,6 +443,22 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertFalse(passive_used_to["warning"])
 
+        negated_location = _fact_ownership_audit(
+            "I'm not living in New York right now.",
+            {"content": "How are you liking New York?"},
+            [],
+            "Target",
+        )
+        self.assertFalse(negated_location["warning"])
+
+        contracted_negation = _fact_ownership_audit(
+            "I don't live in New York.",
+            {"content": "I live in New York."},
+            [],
+            "Target",
+        )
+        self.assertFalse(contracted_negation["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},
@@ -504,6 +520,7 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("tentative future choice", actor)
         self.assertIn("already considered", actor)
         self.assertIn("do not answer every question mechanically", controller)
+        self.assertIn("omit it silently", controller)
         self.assertIn("do not combine separate target facts", controller)
         self.assertIn("home office", controller)
         self.assertIn("supported as a whole", controller)
