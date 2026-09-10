@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_5_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_6_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -181,3 +181,12 @@ V15.5 因此只修正证据归属，不改变计划空间：
 
 V15.4 的 Ca/Cb 目录作为诊断保留。V15.5 使用全新目录从 Ca Gate 6、Ca Gate 30、Cb Gate 6
 重新开始，人工事实归属审计通过后才允许进入 Cb Gate 18。
+
+### V15.6 新建议的时间归属修正
+
+修正真实 Ca 归属审计后，V15.5 Ca Gate 6 在 5/6 停止：伙伴刚刚建议目标人物开 YouTube
+频道，生成结果却声称目标人物“以前已经想过”，把当前建议错误地倒签成目标人物既有经历。
+
+V15.6 允许目标人物接受、拒绝或暂时考虑伙伴的新建议，也允许据此形成未来计划；但如果目标人物
+自己的可见历史没有证据，不得声称自己以前已经考虑、计划、执行或拥有该建议内容。Ca 和 Cb
+runner 的协议标识同步升级为 V15.6，并从全新 Ca Gate 6 重新开始。

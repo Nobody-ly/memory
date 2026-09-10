@@ -77,7 +77,7 @@ from .realtalk_v15 import (
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
-PROTOCOL = "realtalk_task1_ours_v15_4_ca_internal_development"
+PROTOCOL = "realtalk_task1_ours_v15_6_ca_internal_development"
 GATES = (6, 30)
 
 CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)

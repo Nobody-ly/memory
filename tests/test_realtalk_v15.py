@@ -13,6 +13,7 @@ from src.experiments.realtalk_v14 import build_progressive_gate_manifest
 from src.experiments.realtalk_v15 import (
     ACTOR_REPAIR_TEMPLATE,
     ACTOR_USER_TEMPLATE,
+    CONTROLLER_SYSTEM_PROMPT,
     CONTROLLER_USER_TEMPLATE,
     V15Config,
     actor_structure_audit,
@@ -390,6 +391,15 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("I live in LA.", rendered)
         self.assertNotIn("I live in NYC.", rendered)
         self.assertIn("target_owned_history", CONTROLLER_USER_TEMPLATE)
+
+    def test_prompts_do_not_backdate_new_partner_suggestions(self):
+        controller = CONTROLLER_SYSTEM_PROMPT.casefold()
+        actor = ACTOR_USER_TEMPLATE.casefold()
+        self.assertIn("partner proposes a new activity", controller)
+        self.assertIn("suggestion", controller)
+        self.assertIn("previously", controller)
+        self.assertIn("tentative future choice", actor)
+        self.assertIn("already considered", actor)
 
     def test_v15_actor_self_domain_includes_identity_and_boundaries(self):
         projected = _v15_actor_self_domain(_self_domain())

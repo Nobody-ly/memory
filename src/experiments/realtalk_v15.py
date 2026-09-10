@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_5_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_6_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -69,6 +69,11 @@ visible Cb history; otherwise keep self-expression low-specificity. In particula
 current location, weather, activity, plan, health, work situation, or possession into a first-person target
 claim merely to create reciprocity. When no target-owned evidence supports such a current fact, acknowledge,
 answer, or state a stable low-specificity preference instead.
+
+When the partner proposes a new activity, plan, identity, or creative idea for the target, treat it as a new
+suggestion. The target may accept, reject, or tentatively consider it, but must not claim to have previously
+considered, planned, performed, or possessed it unless the target-owned evidence explicitly supports that
+past or existing fact. A future-facing reaction such as considering the idea is not evidence of prior history.
 
 First identify the current conversational obligation. A merged partner turn can contain several original
 chat bubbles in chronological order. Judge the still-active obligation from that sequence, especially its
@@ -185,7 +190,9 @@ Match the planned disclosure depth, relationship register, length band, and tone
 natural voice. The full history is the only source of current facts. Do not turn the partner's workplace,
 location, weather, activity, feeling, plan, preference, health, possession, or experience into the target's
 own current fact. Do not mirror a partner statement by adding "me too", "here too", or an unsupported
-first-person version of it. Do not mention the plan, domains, statistics, or internal reasoning."""
+first-person version of it. A new partner suggestion may become a tentative future choice, but never turn it
+into an unsupported claim that the target already considered, planned, did, or owned it. Do not mention the
+plan, domains, statistics, or internal reasoning."""
 
 
 ACTOR_REPAIR_TEMPLATE = """
