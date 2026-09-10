@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_9_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_10_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -641,11 +641,7 @@ def _fact_ownership_audit(
             clause,
             re.I,
         ))
-        backdated_claim = bool(re.search(
-            r"\b(?:i've|i\s+have|already|before|used\s+to|for\s+a\s+while)\b",
-            clause,
-            re.I,
-        ))
+        backdated_claim = _has_backdated_claim_language(clause)
         if (
             (len(overlap) >= 2 and (explicit_mirroring or backdated_claim))
             or unsupported_concepts
@@ -709,7 +705,7 @@ def _is_external_opinion_clause(clause: str) -> bool:
 
 
 def _is_tentative_future_reaction(clause: str) -> bool:
-    if re.search(r"\b(?:i've|i\s+have|already|before|used\s+to|for\s+a\s+while)\b", clause, re.I):
+    if _has_backdated_claim_language(clause):
         return False
     return bool(re.search(
         r"\b(?:i'll\s+(?:think|consider|try|look|check)|"
@@ -718,6 +714,18 @@ def _is_tentative_future_reaction(clause: str) -> bool:
         clause,
         re.I,
     ))
+
+
+def _has_backdated_claim_language(clause: str) -> bool:
+    return bool(
+        re.search(r"\b(?:already|before|used\s+to|for\s+a\s+while)\b", clause, re.I)
+        or re.search(
+            r"\b(?:i've|i\s+have)\s+(?:previously\s+)?(?:considered|planned|"
+            r"been\s+planning|thought\s+about|started|done|tried|owned)\b",
+            clause,
+            re.I,
+        )
+    )
 
 
 _OWNERSHIP_CONCEPT_PATTERNS = {

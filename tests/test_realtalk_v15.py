@@ -418,6 +418,14 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertFalse(different_personal_habit["warning"])
 
+        negative_experience = _fact_ownership_audit(
+            "I haven't watched it, but I've heard good things about Godzilla Minus One.",
+            {"content": "Godzilla Minus One is a really good movie."},
+            [],
+            "Target",
+        )
+        self.assertFalse(negative_experience["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},
