@@ -15,15 +15,28 @@ judge_model="$6"
 
 mkdir -p "${output_root}"
 
+v9_matched_predictions="${output_root}/v9_predictions_matched.jsonl"
+jq -c --slurpfile selected "${v15_predictions}" '
+  ($selected | map(.result_id) | INDEX(.)) as $wanted
+  | select($wanted[.result_id])
+' "${v9_predictions}" > "${v9_matched_predictions}"
+
+expected_count="$(wc -l < "${v15_predictions}")"
+matched_count="$(wc -l < "${v9_matched_predictions}")"
+if [[ "${matched_count}" -ne "${expected_count}" ]]; then
+  echo "V9/V15 sample mismatch: expected ${expected_count}, matched ${matched_count}" >&2
+  exit 1
+fi
+
 python -m src.experiments.realtalk_local_metrics \
-  --predictions "${v9_predictions}" \
+  --predictions "${v9_matched_predictions}" \
   --output-dir "${output_root}/v9_local"
 python -m src.experiments.realtalk_local_metrics \
   --predictions "${v15_predictions}" \
   --output-dir "${output_root}/v15_local"
 
 python -m src.experiments.realtalk_gpt_judge \
-  --predictions "${v9_predictions}" \
+  --predictions "${v9_matched_predictions}" \
   --dataset-dir "${dataset_dir}" \
   --output-dir "${output_root}/v9_judge" \
   --model "${judge_model}" \

@@ -78,6 +78,9 @@ Ca 开发结果不进入 Table 2。正式 Cb 使用 V9 基于 Ca 前三个 Sessi
 Emotion、Intimacy AD、Empathy AD。GPT 三项复用 Appendix C Prompt，V9/V15 共享 Ground
 Truth 判断。
 
+渐进 Gate 评价先按 V15 的不可变 `result_id` 集从 canonical V9 提取严格匹配子集，并在任何
+本地指标或 Judge 调用前校验记录数一致，禁止把 V9 全 519 条与局部 Gate 混合统计。
+
 主汇总使用 speaker macro mean 和 population std。配对分析固定 seed `20260909`，按 10 位
 speaker 聚类 bootstrap 10,000 次。AD 指标反向后统一以正值表示 V15 改善。
 
