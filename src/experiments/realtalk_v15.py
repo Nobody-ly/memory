@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_4_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_5_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -133,6 +133,9 @@ CURRENT FIVE-LAYER USER DOMAIN:
 
 REAL CAUSAL HISTORY BEFORE THE TARGET TURN:
 {history}
+
+VISIBLE TARGET-OWNED Cb STATEMENTS BEFORE THIS TURN:
+{target_owned_history}
 
 LATEST PARTNER TURN IN THE CURRENT SESSION:
 {latest_partner_turn}
@@ -302,10 +305,13 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                 user_prompt=CONTROLLER_USER_TEMPLATE.format(
                     speaker=point["speaker"],
                     partner=speaker_data["partner"],
-                self_domain=_json(self_domain),
-                target_identity_context=_json(self_domain["identity_context"]),
+                    self_domain=_json(self_domain),
+                    target_identity_context=_json(self_domain["identity_context"]),
                     user_domain=_json(v9["user_domain"]),
                     history=_turns_with_session_boundaries(point["context_turns"]),
+                    target_owned_history=_target_owned_history_text(
+                        point["context_turns"], point["speaker"]
+                    ),
                     latest_partner_turn=(
                         _turns_with_session_boundaries([latest_partner])
                         if latest_partner else "NONE"
@@ -578,13 +584,23 @@ def _fact_ownership_audit(
 ) -> dict[str, Any]:
     if latest_partner is None:
         return {"status": "no-latest-partner-turn", "warning": False}
-    partner_tokens = _distinctive_tokens(str(latest_partner["content"]))
-    previous_target = " ".join(
+    partner_text = str(latest_partner["content"])
+    partner_tokens = _distinctive_tokens(partner_text)
+    previous_target_turns = [
         str(turn["content"]) for turn in context_turns
         if turn["speaker"].casefold() == speaker.casefold()
-    )
+    ]
+    previous_target = " ".join(previous_target_turns)
     stable_self = _json(self_domain.get("identity_context", {})) if self_domain else ""
     prior_tokens = _distinctive_tokens(previous_target + " " + stable_self)
+    # A merged turn is one source contribution: concepts stated in separate bubbles of
+    # that turn can still be mirrored as one invented target relation. Preserve target
+    # turn boundaries so unrelated concepts from older turns do not falsely support it.
+    partner_concept_sets = [_ownership_concepts(partner_text)]
+    prior_concept_sets = [
+        concepts for text in previous_target_turns
+        if (concepts := _ownership_concepts(text))
+    ] + _clause_concept_sets(stable_self)
     suspicious_clauses = []
     for clause in re.split(r"(?:[.!]+|\n+)", message):
         clause = clause.strip()
@@ -596,8 +612,25 @@ def _fact_ownership_audit(
         if not first_person:
             continue
         overlap = sorted((_distinctive_tokens(clause) & partner_tokens) - prior_tokens)
-        if len(overlap) >= 2:
-            suspicious_clauses.append({"clause": clause[:300], "overlap_tokens": overlap[:20]})
+        clause_concepts = _ownership_concepts(clause)
+        partner_concepts = set().union(*partner_concept_sets) if partner_concept_sets else set()
+        unsupported_concepts = sorted(
+            concept for concept in clause_concepts & partner_concepts
+            if not any(concept in prior for prior in prior_concept_sets)
+        )
+        mirrored_pairs = sorted(
+            "+".join(sorted(pair))
+            for pair in _concept_pairs(clause_concepts)
+            if any(pair.issubset(partner) for partner in partner_concept_sets)
+            and not any(pair.issubset(prior) for prior in prior_concept_sets)
+        )
+        if len(overlap) >= 2 or unsupported_concepts or mirrored_pairs:
+            suspicious_clauses.append({
+                "clause": clause[:300],
+                "overlap_tokens": overlap[:20],
+                "unsupported_concepts": unsupported_concepts,
+                "mirrored_concept_pairs": mirrored_pairs,
+            })
     suspicious = sorted({
         token for item in suspicious_clauses for token in item["overlap_tokens"]
     })
@@ -606,6 +639,16 @@ def _fact_ownership_audit(
         "status": "blocking-manual-review-required" if warning else "passed",
         "warning": warning,
         "overlap_tokens": suspicious[:20],
+        "unsupported_concepts": sorted({
+            concept
+            for item in suspicious_clauses
+            for concept in item["unsupported_concepts"]
+        }),
+        "mirrored_concept_pairs": sorted({
+            pair
+            for item in suspicious_clauses
+            for pair in item["mirrored_concept_pairs"]
+        }),
         "suspicious_self_clauses": suspicious_clauses,
         "automatic_rewrite": False,
         "requires_manual_review_when_warning": True,
@@ -623,6 +666,50 @@ def _distinctive_tokens(text: str) -> set[str]:
         token for token in re.findall(r"[a-z][a-z'-]{3,}", text.casefold())
         if token not in stop
     }
+
+
+_OWNERSHIP_CONCEPT_PATTERNS = {
+    "location:new-york": r"\b(?:new\s+york|nyc)\b",
+    "weather:cold": r"\b(?:cold|freez(?:e|es|ing)|chill(?:y|ier|iest)?)\b",
+    "place:office": r"\b(?:office|workplace)\b",
+}
+
+
+def _ownership_concepts(text: str) -> set[str]:
+    return {
+        concept for concept, pattern in _OWNERSHIP_CONCEPT_PATTERNS.items()
+        if re.search(pattern, text, flags=re.I)
+    }
+
+
+def _clause_concept_sets(text: str) -> list[set[str]]:
+    return [
+        concepts
+        for clause in re.split(r"(?:[.!?]+|\n+)", text)
+        if (concepts := _ownership_concepts(clause))
+    ]
+
+
+def _concept_pairs(concepts: set[str]) -> set[frozenset[str]]:
+    ordered = sorted(concepts)
+    return {
+        frozenset((ordered[left], ordered[right]))
+        for left in range(len(ordered))
+        for right in range(left + 1, len(ordered))
+    }
+
+
+def _target_owned_history_text(
+    context_turns: list[dict[str, Any]], speaker: str
+) -> str:
+    target_turns = [
+        turn for turn in context_turns
+        if turn["speaker"].casefold() == speaker.casefold()
+    ]
+    return (
+        _turns_with_session_boundaries(target_turns)
+        if target_turns else "NONE: the target has not spoken in visible Cb history yet."
+    )
 
 
 def _v15_actor_self_domain(self_domain: dict[str, Any]) -> dict[str, Any]:

@@ -66,6 +66,7 @@ from .realtalk_v15 import (
     MODEL,
     _prompt_hashes,
     _run_actor_with_contract_retries,
+    _target_owned_history_text,
     aggregate_v15_diagnostics,
     build_v15_activation_whitelist,
     resolve_v15_profile_activation,
@@ -277,6 +278,9 @@ def run_v15_ca_dev(
                     ),
                     user_domain=_json(domain),
                     history=_turns_with_session_boundaries(point["context_turns"]),
+                    target_owned_history=_target_owned_history_text(
+                        point["context_turns"], speaker
+                    ),
                     latest_partner_turn=(
                         _turns_with_session_boundaries([latest_partner])
                         if latest_partner else "NONE"

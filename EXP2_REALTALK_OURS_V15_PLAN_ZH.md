@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 协议：`realtalk_task1_ours_v15_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_5_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -162,3 +162,21 @@ V15.4 明确分工：
 - 事实归属审计仅将 `identity_context` 视为稳定人物事实，不把行为描述中的伙伴案例当作目标事实。
 
 V15.3 的 Cb Gate 6 保留为失败诊断；V15.4 使用新目录重新运行 Ca Gate 6。
+
+### V15.5 目标事实归属索引与组合审计
+
+V15.4 完成 Ca Gate 30，随后 Cb Gate 6 的结构检查也通过；但人工复核发现 Controller 仍可能从
+完整交错历史中混淆事实所有者。三条初始疑例经逐条因果历史复核后结论不同：Akib 此前已经由
+自己陈述当地寒冷和结冰，不属于迁移；Emi 的“正在享受 New York”没有目标人物明确当前事实；
+Muhhamed 的“我的办公室也很冷”把伙伴同一陈述中的办公室和寒冷关系组合成了自己的事实。
+
+V15.5 因此只修正证据归属，不改变计划空间：
+
+- Controller 在完整因果历史之外额外看到按 turn ID 列出的“目标人物自己此前说过的话”，帮助
+  区分交错历史中的事实所有者；完整历史仍全部保留，不压缩、不检索、不读取未来；
+- 确定性审计对地点、天气和工作场所等所有权敏感概念做同义归一，并检查伙伴陈述中的概念组合
+  是否曾由目标人物在同一陈述中建立；单独出现过两个概念不等于该关系已经成立；
+- 已被目标人物先前陈述支持的事实继续放行，命中无支持的镜像关系则阻断当前 Gate，不自动改写。
+
+V15.4 的 Ca/Cb 目录作为诊断保留。V15.5 使用全新目录从 Ca Gate 6、Ca Gate 30、Cb Gate 6
+重新开始，人工事实归属审计通过后才允许进入 Cb Gate 18。

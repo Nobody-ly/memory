@@ -18,6 +18,7 @@ from src.experiments.realtalk_v15 import (
     actor_structure_audit,
     build_v15_activation_whitelist,
     _fact_ownership_audit,
+    _target_owned_history_text,
     _v15_actor_self_domain,
     resolve_v15_profile_activation,
     run_v15,
@@ -345,6 +346,50 @@ class RealTalkV15Tests(unittest.TestCase):
             {"identity_context": {"life_background": ["Target lives in New York."]}},
         )
         self.assertFalse(self_supported["warning"])
+
+    def test_fact_ownership_audit_normalizes_sensitive_concepts_and_pairs(self):
+        context = [{"speaker": "Target", "content": "I live in Los Angeles."}]
+        new_york = _fact_ownership_audit(
+            "I'm really enjoying New York so far.",
+            {"content": "How are you liking NYC?"},
+            context,
+            "Target",
+        )
+        self.assertTrue(new_york["warning"])
+        self.assertIn("location:new-york", new_york["unsupported_concepts"])
+
+        supported_cold = _fact_ownership_audit(
+            "I'm trying to get through the day without freezing.",
+            {"content": "You have to layer up when it is cold."},
+            [{"speaker": "Target", "content": "It is really chilly out today."}],
+            "Target",
+        )
+        self.assertFalse(supported_cold["warning"])
+
+        mirrored_office_weather = _fact_ownership_audit(
+            "My office is always freezing too.",
+            {"content": "My office was chilly until it got a new heater."},
+            [
+                {"speaker": "Target", "content": "I have a home office."},
+                {"speaker": "Target", "content": "It is cold outside today."},
+            ],
+            "Target",
+        )
+        self.assertTrue(mirrored_office_weather["warning"])
+        self.assertIn(
+            "place:office+weather:cold",
+            mirrored_office_weather["mirrored_concept_pairs"],
+        )
+
+    def test_controller_receives_explicit_target_owned_cb_evidence(self):
+        turns = [
+            {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},
+            {"turn_id": "session_1:turn_1", "session_id": "session_1", "speaker": "Partner", "content": "I live in NYC."},
+        ]
+        rendered = _target_owned_history_text(turns, "Target")
+        self.assertIn("I live in LA.", rendered)
+        self.assertNotIn("I live in NYC.", rendered)
+        self.assertIn("target_owned_history", CONTROLLER_USER_TEMPLATE)
 
     def test_v15_actor_self_domain_includes_identity_and_boundaries(self):
         projected = _v15_actor_self_domain(_self_domain())
