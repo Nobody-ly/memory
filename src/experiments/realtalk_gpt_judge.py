@@ -174,8 +174,46 @@ def _chat(base_url: str, api_key: str, model: str, prompt: str) -> tuple[str, di
 
 
 def _contexts(dataset_dir: Path, rows: list[dict[str, Any]]) -> dict[str, str]:
-    wanted = {row["speaker"] for row in rows}
     contexts: dict[str, str] = {}
+    legacy_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not all(
+            field in row
+            for field in ("current_file", "target_session", "target_turn_id")
+        ):
+            legacy_rows.append(row)
+            continue
+        source = (dataset_dir / row["current_file"]).resolve()
+        try:
+            source.relative_to(dataset_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"current_file escapes dataset directory: {source}") from exc
+        chat = load_json(str(source))
+        points = build_message_level_points(
+            chat, row["speaker"], test_sessions=3, merge_adjacent_bubbles=True,
+        )
+        matches = [
+            point for point in points
+            if point["target_session"] == row["target_session"]
+            and point["target"]["turn_id"] == row["target_turn_id"]
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"failed to identify one source point for {row['result_id']}: "
+                f"matches={len(matches)}"
+            )
+        point = matches[0]
+        if row.get("ground_truth") != point["target_message"]:
+            raise ValueError(f"ground truth does not match source for {row['result_id']}")
+        within_session = [
+            turn for turn in point["context_turns"]
+            if turn["session_id"] == point["target_session"]
+        ]
+        contexts[row["result_id"]] = "\n".join(
+            f"{turn['speaker']}: {turn['content']}" for turn in within_session
+        )
+
+    wanted = {row["speaker"] for row in legacy_rows}
     for split in select_realtalk_splits(dataset_dir, speaker_filter=sorted(wanted)):
         chat = load_json(str(dataset_dir / split["test_chat"]))
         points = build_message_level_points(

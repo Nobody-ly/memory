@@ -37,6 +37,26 @@ class RealTalkGptJudgeTest(unittest.TestCase):
         )
         self.assertIn(result_id, contexts)
 
+    def test_context_supports_provenance_based_ca_development_rows(self):
+        result_id = "ca_dev:Chat_4_Emi_Paola.json:Paola:session_3:turn_1"
+        rows = [{
+            "result_id": result_id,
+            "speaker": "Paola",
+            "current_file": "Chat_4_Emi_Paola.json",
+            "target_session": "session_3",
+            "target_turn_id": "session_3:turn_1",
+            "ground_truth": (
+                "I am pretty good Bella, what about you, did you do any fun activities today?"
+            ),
+        }]
+        context = _contexts(Path("dataset"), rows)[result_id]
+        self.assertIn("Emi: Hey Liza! How are you today?", context)
+        self.assertNotIn("book club", context.casefold())
+
+        rows[0]["ground_truth"] = "wrong reference"
+        with self.assertRaisesRegex(ValueError, "ground truth does not match source"):
+            _contexts(Path("dataset"), rows)
+
     def test_boolean_parser(self):
         self.assertTrue(_parse_bool("True"))
         self.assertFalse(_parse_bool("'False'."))
