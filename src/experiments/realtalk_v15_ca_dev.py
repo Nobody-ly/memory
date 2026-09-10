@@ -64,6 +64,7 @@ from .realtalk_v15 import (
     CONTROLLER_SYSTEM_PROMPT,
     CONTROLLER_USER_TEMPLATE,
     MODEL,
+    _fact_ownership_audit,
     _prompt_hashes,
     _run_actor_with_contract_retries,
     _target_owned_history_text,
@@ -317,6 +318,20 @@ def run_v15_ca_dev(
                 max_attempts=config.operation_max_attempts,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
             )
+            fact_ownership_audit = _fact_ownership_audit(
+                actor["generated_message"],
+                latest_partner,
+                point["context_turns"],
+                speaker,
+                self_domains[speaker],
+            )
+            if fact_ownership_audit["warning"]:
+                raise ValueError(
+                    "fact ownership audit found unsupported partner-to-target transfer: "
+                    f"tokens={fact_ownership_audit['overlap_tokens']} "
+                    f"concepts={fact_ownership_audit.get('unsupported_concepts', [])} "
+                    f"pairs={fact_ownership_audit.get('mirrored_concept_pairs', [])}"
+                )
             checkpoint.store_result(result_id, {
                 "result_id": result_id,
                 "speaker": speaker,
@@ -340,6 +355,7 @@ def run_v15_ca_dev(
                     current_session_turns, speaker
                 ),
                 "actor_structure_audit": actor["audit"],
+                "fact_ownership_audit": fact_ownership_audit,
                 "operation_audit": {
                     "controller": controller["audit"],
                     "actor": actor["operation_audits"],
@@ -354,9 +370,7 @@ def run_v15_ca_dev(
     result_index = {row["result_id"]: row for row in checkpoint.result_values()}
     results = [result_index[result_id] for result_id in selected_ids if result_id in result_index]
     unresolved = _checkpoint_unresolved(checkpoint)
-    diagnostics = aggregate_v15_diagnostics([
-        {**row, "fact_ownership_audit": {"warning": False}} for row in results
-    ])
+    diagnostics = aggregate_v15_diagnostics(results)
     _write_jsonl(output_dir / "predictions.jsonl", results)
     _write_json(output_dir / "self_domains_session12.json", self_domains)
     _write_json(output_dir / "user_domains_session12.json", user_domains)

@@ -604,6 +604,8 @@ class RealTalkV15Tests(unittest.TestCase):
             ]
             self.assertTrue(all(row["ca_internal_development_only"] for row in rows))
             self.assertTrue(all(row["target_session"] not in row["profile_sessions"] for row in rows))
+            self.assertTrue(all("fact_ownership_audit" in row for row in rows))
+            self.assertTrue(all(not row["fact_ownership_audit"]["warning"] for row in rows))
 
 
 if __name__ == "__main__":
