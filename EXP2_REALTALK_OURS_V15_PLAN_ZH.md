@@ -80,6 +80,8 @@ Truth 判断。
 
 渐进 Gate 评价先按 V15 的不可变 `result_id` 集从 canonical V9 提取严格匹配子集，并在任何
 本地指标或 Judge 调用前校验记录数一致，禁止把 V9 全 519 条与局部 Gate 混合统计。
+若 canonical V9 的完整 Appendix C `scored.jsonl` 已存在，则按相同 ID 直接复用其 V9 判断，
+不重复调用 Judge；V15 仍从同一完整 checkpoint 复用 Ground Truth 标签并只评价新候选。
 
 主汇总使用 speaker macro mean 和 population std。配对分析固定 seed `20260909`，按 10 位
 speaker 聚类 bootstrap 10,000 次。AD 指标反向后统一以正值表示 V15 改善。
