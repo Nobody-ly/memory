@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_1"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -104,6 +104,8 @@ DECISION_SYSTEM_PROMPT = """You are the private understanding and alignment step
 Understand the current exchange as the target person. Use the reference conversation as evidence of the
 target's identity and voice, and the current conversation as the reality of this particular relationship.
 Distinguish the target person's current context, the partner's current state, and their shared interaction.
+Treat an explicit new-session boundary as a real temporal break: earlier threads remain background, but are
+not automatically the active topic. The boundary does not prescribe a greeting or any other fixed action.
 Weigh the target's own tendencies against the partner's expectations only when those expectations are
 relevant. lambda_trace records this soft balance: lower means the target's own tendency dominates; higher
 means the conversational intention is more adapted to the current partner. It is not an empathy score,
@@ -129,6 +131,9 @@ CURRENT FIVE-LAYER PARTNER MODEL:
 CURRENT CONVERSATION TO CONTINUE (REAL HISTORY BEFORE THE TARGET TURN):
 {current_history}
 
+CURRENT CONVERSATION POSITION (KNOWN BEFORE THE TARGET TEXT):
+{conversation_position}
+
 VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 {visible_evidence_ids}
 
@@ -142,6 +147,9 @@ CURRENT HISTORY SCOPE: all text below, ending strictly before the target turn
 
 COMPLETE OBSERVED CONVERSATION, PROVIDED ONCE:
 {current_history}
+
+CURRENT CONVERSATION POSITION (KNOWN BEFORE THE TARGET TEXT):
+{conversation_position}
 
 PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 {self_domain}
@@ -169,6 +177,9 @@ PRIVATE SELF DOMAIN:
 CURRENT CONVERSATION TO CONTINUE (REAL HISTORY BEFORE YOUR NEXT TURN):
 {current_history}
 
+CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
+{conversation_position}
+
 PRIVATE SCENE AND CONVERSATIONAL INTENTION:
 {scene_and_policy}
 
@@ -179,6 +190,9 @@ CURRENT HISTORY SCOPE: all text below, ending strictly before your next turn
 
 COMPLETE OBSERVED CONVERSATION, PROVIDED ONCE:
 {current_history}
+
+CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
+{conversation_position}
 
 PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 {self_domain}
@@ -477,12 +491,21 @@ def build_gate_manifests(prepared: list[dict[str, Any]], mode: str) -> dict[str,
 def build_generation_input(
     item: dict[str, Any], point: dict[str, Any], user_domain: dict[str, Any]
 ) -> dict[str, Any]:
+    observed_in_target_session = sum(
+        turn["session_id"] == point["target_session"]
+        for turn in point["context_turns"]
+    )
     return {
         "mode": item["mode"], "speaker": item["speaker"], "partner": item["partner"],
         "reference_partner": item.get("reference_partner", item["partner"]),
         "reference_scope": item["reference_scope"],
         "reference_turns": item["reference_turns"],
         "current_turns": point["context_turns"],
+        "conversation_position": {
+            "target_session": point["target_session"],
+            "observed_turns_in_target_session": observed_in_target_session,
+            "starts_new_session": observed_in_target_session == 0,
+        },
         "user_domain": user_domain,
     }
 
@@ -500,12 +523,14 @@ def decision_prompt(
             reference_history=format_evidence_turns(generation_input["reference_turns"]),
             self_domain=_json(self_domain), user_domain=_json(generation_input["user_domain"]),
             current_history=format_evidence_turns(generation_input["current_turns"]),
+            conversation_position=_json(generation_input["conversation_position"]),
             visible_evidence_ids=_json(sorted(visible)),
         )
     return DECISION_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"], partner=generation_input["partner"],
         reference_scope=generation_input["reference_scope"],
         current_history=format_evidence_turns(generation_input["current_turns"]),
+        conversation_position=_json(generation_input["conversation_position"]),
         self_domain=_json(self_domain), user_domain=_json(generation_input["user_domain"]),
         visible_evidence_ids=_json(sorted(visible)),
     )
@@ -524,12 +549,14 @@ def actor_prompt(
             reference_history=format_evidence_turns(generation_input["reference_turns"]),
             self_domain=_json(self_domain),
             current_history=format_evidence_turns(generation_input["current_turns"]),
+            conversation_position=_json(generation_input["conversation_position"]),
             scene_and_policy=_json(scene_and_policy),
         )
     return ACTOR_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"],
         reference_scope=generation_input["reference_scope"],
         current_history=format_evidence_turns(generation_input["current_turns"]),
+        conversation_position=_json(generation_input["conversation_position"]),
         self_domain=_json(self_domain), scene_and_policy=_json(scene_and_policy),
     )
 

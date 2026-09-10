@@ -235,6 +235,24 @@ class EvidenceDataTests(unittest.TestCase):
         self.assertNotIn('"alignment"', actor_text)
         self.assertNotIn('"update_summary"', actor_text)
 
+    def test_new_session_position_is_visible_without_target_text(self):
+        item = self.dev[0]
+        point = item["points"][0]
+        generation_input = build_generation_input(item, point, empty_user_domain())
+        self.assertEqual(generation_input["conversation_position"], {
+            "target_session": "session_3",
+            "observed_turns_in_target_session": 0,
+            "starts_new_session": True,
+        })
+        self_domain = _self_value(next(iter(evidence_ids(
+            item["reference_turns"], item["speaker"]
+        ))))
+        decision_text = decision_prompt(generation_input, self_domain)
+        actor_text = actor_prompt(generation_input, self_domain, _decision_value())
+        self.assertIn('"starts_new_session": true', decision_text)
+        self.assertIn('"starts_new_session": true', actor_text)
+        self.assertNotIn(point["target_message"], decision_text + actor_text)
+
     def test_evidence_ids_are_namespaced_by_file(self):
         raw = [{
             "turn_id": "session_1:turn_0", "session_id": "session_1",

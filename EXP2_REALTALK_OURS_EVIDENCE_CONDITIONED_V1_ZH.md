@@ -1,6 +1,6 @@
 # REALTALK Ours Evidence-Conditioned V1
 
-状态：实现锚点。协议：`realtalk_task1_ours_evidence_conditioned_v1`。
+状态：实现锚点。协议：`realtalk_task1_ours_evidence_conditioned_v1_1`。
 
 该实现依据 `D:/codex_workspace/realtalk-from-zero-research-20260910/RESEARCH_AND_DESIGN_ZH.md`
 与 `EXECUTOR_PLAN_ZH.md`，从任务和公开数据重新设计，不继承 V9-V15 的 Self/User/Decision 产物。
@@ -23,3 +23,7 @@ Session 3 做因果预测，按 6 -> 24 -> 68 扩大。冻结后正式 Cb 才按
 
 原始 `D1:1` 类消息 ID 会在不同 Chat 文件重复。所有画像与决策证据使用
 `{Chat文件名}::{session turn_id}` 作为全局唯一 ID；原始 `dia_id` 仅作为并列审计字段保留。
+
+V1.1 向 Decision 和 Actor 显式披露目标点所在 Session、该 Session 已观察轮次数及是否位于
+新 Session 起点。这些元数据在答案文本出现前已知，只用于避免把上个 Session 的末尾话题误当成
+当前仍在进行；它不规定必须问候或执行固定动作。
