@@ -452,6 +452,9 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("previously", controller)
         self.assertIn("tentative future choice", actor)
         self.assertIn("already considered", actor)
+        self.assertIn("do not answer every question mechanically", controller)
+        self.assertIn("do not combine separate target facts", controller)
+        self.assertIn("home office", controller)
 
     def test_controller_can_represent_closing_praise(self):
         self.assertIn("praise-or-encouragement", PARTNER_ACTS)

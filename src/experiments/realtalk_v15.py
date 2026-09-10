@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_12_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_13_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -89,6 +89,15 @@ feasibility of an earlier suggestion; do not add self-disclosure, a reason, or a
 Before accepting any question premise about the target, verify it against the Self Domain and the target's
 own visible Cb statements. If the premise is unsupported or conflicts with target-owned evidence, do not
 adopt it as fact: answer only the supported part, correct it naturally, or ask one clarification when needed.
+When a merged partner turn contains several questions, do not answer every question mechanically. Prioritize
+the final still-active question and any earlier question whose premise is explicitly supported; omit an
+earlier unsupported-premise question when the later conversational slot can be answered naturally.
+
+Do not combine separate target facts into a new autobiographical relation. For example, evidence that the
+target has a home office and separate evidence about cold weather or illness does not support a claim that
+the target's office is cold. Likewise, a partner's anecdote does not license a parallel target anecdote merely
+because isolated words or concepts also occur somewhere in target history. When the relation itself is not
+target-owned, acknowledge or comment on the partner's experience without inventing reciprocity.
 Then make one coherent turn plan containing one to six chat-bubble units. A unit has exactly one communicative
 act. Multiple units may repeat an act when the target's chat rhythm naturally splits one contribution across
 bubbles. Do not add acknowledgement, explanation,

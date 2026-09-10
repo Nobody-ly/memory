@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_12_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_13_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -246,3 +246,15 @@ V15.11 的一致性校验正确拒绝了错误计划，但三次格式修复都�
 建议。V15.12 在 Controller 主 Prompt 中明确优先级：当当前动作是结尾赞美且义务为 acknowledge，
 只规划简短感谢或欣赏，不提及、回答、评价、接受或拒绝更早建议，也不增加自我披露、理由或未来
 计划。既有一致性校验继续兜底，不新增调用阶段。协议同步升级并从 Ca Gate 6 重跑。
+
+### V15.13 多问题优先级与事实关系边界
+
+V15.12 通过 Ca Gate 30，但 Cb Gate 6 在 4/6 停止。两条错误都来自 Controller：Emi 的合并
+伙伴轮次包含三个问题，Controller 机械回答全部问题并接受未确认的 New York 当前前提；
+Muhhamed 的历史分别出现过 home office、感冒和寒冷，Controller 却把这些分散概念与伙伴的
+办公室暖气故事组合成“我的办公室也很冷”。
+
+V15.13 明确：合并轮次有多个问题时，只优先最后仍活跃且前提有证据的槽位，不要求逐个完整回答；
+目标人物在不同陈述中分别出现两个概念，不构成二者关系的证据，也不能据此编造与伙伴平行的
+个人经历。关系没有目标人物证据时，只回应伙伴经历。协议同步升级，并重新执行 Ca Gate 6/30
+后再进入 Cb Gate 6。
