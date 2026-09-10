@@ -49,7 +49,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_1_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -66,7 +66,10 @@ Use at most two User Domain facts by selecting their fact_id exactly from the in
 or rewrite the fact text. Select facts only when they directly affect this turn. The User Domain conditions
 the interaction but never replaces the target's identity. Do not copy an old
 Ca event or partner fact as a current target fact. Current autobiographical detail must be supported by the
-visible Cb history; otherwise keep self-expression low-specificity.
+visible Cb history; otherwise keep self-expression low-specificity. In particular, never mirror the partner's
+current location, weather, activity, plan, health, work situation, or possession into a first-person target
+claim merely to create reciprocity. When no target-owned evidence supports such a current fact, acknowledge,
+answer, or state a stable low-specificity preference instead.
 
 First identify the current conversational obligation. A merged partner turn can contain several original
 chat bubbles in chronological order. Judge the still-active obligation from that sequence, especially its
@@ -169,8 +172,9 @@ Other units must not ask a question.
 
 Match the planned disclosure depth, relationship register, length band, and tone while keeping the target's
 natural voice. The full history is the only source of current facts. Do not turn the partner's workplace,
-activity, feeling, plan, preference, or experience into the target's own. Do not mention the plan, domains,
-statistics, or internal reasoning."""
+location, weather, activity, feeling, plan, preference, health, possession, or experience into the target's
+own current fact. Do not mirror a partner statement by adding "me too", "here too", or an unsupported
+first-person version of it. Do not mention the plan, domains, statistics, or internal reasoning."""
 
 
 ACTOR_REPAIR_TEMPLATE = """
@@ -331,6 +335,15 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                 max_attempts=config.operation_max_attempts,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
             )
+            fact_ownership_audit = _fact_ownership_audit(
+                actor_result["generated_message"], latest_partner,
+                point["context_turns"], point["speaker"]
+            )
+            if fact_ownership_audit["warning"]:
+                raise ValueError(
+                    "fact ownership audit found unsupported partner-to-target transfer: "
+                    f"{fact_ownership_audit['overlap_tokens']}"
+                )
             result = {
                 **{
                     key: v9[key] for key in (
@@ -352,9 +365,7 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                     point["context_turns"], point["speaker"]
                 ),
                 "actor_structure_audit": actor_result["audit"],
-                "fact_ownership_audit": _fact_ownership_audit(
-                    actor_result["generated_message"], latest_partner, point["context_turns"], point["speaker"]
-                ),
+                "fact_ownership_audit": fact_ownership_audit,
                 "operation_audit": {
                     "controller": decision_envelope["audit"],
                     "actor": actor_result["operation_audits"],
@@ -545,19 +556,33 @@ def _fact_ownership_audit(
     if latest_partner is None:
         return {"status": "no-latest-partner-turn", "warning": False}
     partner_tokens = _distinctive_tokens(str(latest_partner["content"]))
-    generated_tokens = _distinctive_tokens(message)
     previous_target = " ".join(
         str(turn["content"]) for turn in context_turns
         if turn["speaker"].casefold() == speaker.casefold()
     )
     prior_tokens = _distinctive_tokens(previous_target)
-    suspicious = sorted((partner_tokens & generated_tokens) - prior_tokens)
-    first_person = bool(re.search(r"\b(?:i|i'm|i've|i'd|me|my|mine)\b", message, re.I))
-    warning = first_person and len(suspicious) >= 3
+    suspicious_clauses = []
+    for clause in re.split(r"(?:[.!]+|\n+)", message):
+        clause = clause.strip()
+        if not clause or "?" in clause:
+            continue
+        first_person = bool(
+            re.search(r"\b(?:i|i'm|i've|i'd|me|my|mine)\b", clause, re.I)
+        )
+        if not first_person:
+            continue
+        overlap = sorted((_distinctive_tokens(clause) & partner_tokens) - prior_tokens)
+        if len(overlap) >= 2:
+            suspicious_clauses.append({"clause": clause[:300], "overlap_tokens": overlap[:20]})
+    suspicious = sorted({
+        token for item in suspicious_clauses for token in item["overlap_tokens"]
+    })
+    warning = bool(suspicious_clauses)
     return {
-        "status": "heuristic-warning-only",
+        "status": "blocking-manual-review-required" if warning else "passed",
         "warning": warning,
         "overlap_tokens": suspicious[:20],
+        "suspicious_self_clauses": suspicious_clauses,
         "automatic_rewrite": False,
         "requires_manual_review_when_warning": True,
     }
@@ -568,6 +593,7 @@ def _distinctive_tokens(text: str) -> set[str]:
         "about", "after", "again", "also", "because", "been", "being", "could",
         "from", "have", "just", "really", "that", "their", "there", "these", "they",
         "this", "those", "what", "when", "where", "which", "with", "would", "your",
+        "glad", "it's",
     }
     return {
         token for token in re.findall(r"[a-z][a-z'-]{3,}", text.casefold())

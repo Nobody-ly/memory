@@ -17,6 +17,7 @@ from src.experiments.realtalk_v15 import (
     V15Config,
     actor_structure_audit,
     build_v15_activation_whitelist,
+    _fact_ownership_audit,
     resolve_v15_profile_activation,
     run_v15,
 )
@@ -298,6 +299,30 @@ class RealTalkV15Tests(unittest.TestCase):
         invalid["alignment"]["lambda_trace"] = 0
         with self.assertRaisesRegex(ValueError, "requires nonzero"):
             normalize_v15_decision(invalid)
+
+    def test_fact_ownership_audit_checks_first_person_statements_not_questions(self):
+        latest = {"content": "It is cold here and I am heading out to work."}
+        context = [{"speaker": "Target", "content": "I usually stay inside."}]
+        transferred = _fact_ownership_audit(
+            "It is cold here too, so I'm heading out anyway.", latest, context, "Target"
+        )
+        self.assertTrue(transferred["warning"])
+
+        partner_question = _fact_ownership_audit(
+            "I'm having a quiet day. How is your cold trip to work?",
+            latest,
+            context,
+            "Target",
+        )
+        self.assertFalse(partner_question["warning"])
+
+        general_comment = _fact_ownership_audit(
+            "Data leaks are difficult for companies. I'm hoping it is a small glitch.",
+            {"content": "The company is worried about data leaks."},
+            context,
+            "Target",
+        )
+        self.assertFalse(general_comment["warning"])
 
     def test_user_domain_activation_uses_stable_fact_ids(self):
         domain = empty_user_domain()
