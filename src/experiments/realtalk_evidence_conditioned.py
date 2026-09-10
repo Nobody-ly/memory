@@ -242,8 +242,13 @@ def format_evidence_turns(turns: Iterable[dict[str, Any]]) -> str:
         if turn["session_id"] != current_session:
             current_session = turn["session_id"]
             blocks.append(f"[SESSION {current_session}]")
-        ids = ",".join(turn["dia_ids"]) or turn["turn_id"]
-        blocks.append(f"[{turn['turn_id']} | {ids}] {turn['speaker']}: {turn['content']}")
+        if "source_id" not in turn:
+            raise ValueError("evidence turn is missing a globally unique source_id")
+        raw_ids = ",".join(turn["dia_ids"]) or "none"
+        blocks.append(
+            f"[{turn['source_id']} | source_message_ids={raw_ids}] "
+            f"{turn['speaker']}: {turn['content']}"
+        )
     return "\n".join(blocks)
 
 
@@ -252,9 +257,31 @@ def evidence_ids(turns: Iterable[dict[str, Any]], speaker: str | None = None) ->
     for turn in turns:
         if speaker is not None and turn["speaker"].casefold() != speaker.casefold():
             continue
-        result.add(turn["turn_id"])
-        result.update(identifier for identifier in turn["dia_ids"] if identifier)
+        if "source_id" not in turn:
+            raise ValueError("evidence turn is missing a globally unique source_id")
+        result.add(turn["source_id"])
     return result
+
+
+def tag_source(turns: Iterable[dict[str, Any]], file_id: str) -> list[dict[str, Any]]:
+    """Attach the file namespace required because D1:1-style IDs repeat by chat."""
+    return [
+        {
+            **turn,
+            "file_id": file_id,
+            "source_id": f"{file_id}::{turn['turn_id']}",
+            "source_message_ids": list(turn["dia_ids"]),
+        }
+        for turn in turns
+    ]
+
+
+def tag_point_source(point: dict[str, Any], file_id: str) -> dict[str, Any]:
+    return {
+        **point,
+        "context_turns": tag_source(point["context_turns"], file_id),
+        "target": tag_source([point["target"]], file_id)[0],
+    }
 
 
 def prepare_ca_dev(dataset_dir: str | Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -266,14 +293,16 @@ def prepare_ca_dev(dataset_dir: str | Path) -> tuple[list[dict[str, Any]], dict[
         chat = json.loads(path.read_text(encoding="utf-8"))
         speaker = canonical_speaker(chat, requested_speaker)
         partner = canonical_speaker(chat, requested_partner)
-        all_turns = protocol_turns(chat, merge_adjacent_bubbles=True)
+        all_turns = tag_source(
+            protocol_turns(chat, merge_adjacent_bubbles=True), filename
+        )
         reference_sessions = session_keys(chat)[:2]
         reference_turns = [
             turn for turn in all_turns if turn["session_id"] in set(reference_sessions)
         ]
         session_three = session_keys(chat)[2]
         points = [
-            point for point in build_message_level_points(
+            tag_point_source(point, filename) for point in build_message_level_points(
                 chat, speaker, test_sessions=3, max_context_chars=0,
                 merge_adjacent_bubbles=True,
             ) if point["target_session"] == session_three
@@ -322,15 +351,21 @@ def prepare_formal_cb(dataset_dir: str | Path) -> tuple[list[dict[str, Any]], di
             reference_chat, speaker, profile_sessions=3,
             merge_adjacent_bubbles=True,
         )
-        points = build_message_level_points(
-            current_chat, speaker, test_sessions=3, max_context_chars=0,
-            merge_adjacent_bubbles=True,
-        )
+        points = [
+            tag_point_source(point, split["test_chat"])
+            for point in build_message_level_points(
+                current_chat, speaker, test_sessions=3, max_context_chars=0,
+                merge_adjacent_bubbles=True,
+            )
+        ]
         for point in points:
             point["result_id"] = f"cb:{speaker}:{point['target']['turn_id']}"
         current_sessions = session_keys(current_chat)[:3]
         current_turns = [
-            turn for turn in protocol_turns(current_chat, merge_adjacent_bubbles=True)
+            turn for turn in tag_source(
+                protocol_turns(current_chat, merge_adjacent_bubbles=True),
+                split["test_chat"],
+            )
             if turn["session_id"] in set(current_sessions)
         ]
         for path in (reference_path, current_path):
@@ -341,7 +376,7 @@ def prepare_formal_cb(dataset_dir: str | Path) -> tuple[list[dict[str, Any]], di
             "reference_file": split["train_chat"], "current_file": split["test_chat"],
             "reference_scope": "session_1..session_3",
             "reference_sessions": reference["sessions"],
-            "reference_turns": reference["turns"],
+            "reference_turns": tag_source(reference["turns"], split["train_chat"]),
             "current_turns": current_turns, "points": points,
         })
     manifest = _dataset_manifest(dataset, source_hashes, prepared, "cb")
@@ -552,7 +587,7 @@ def _actor_call(
     )
 
 
-def run(
+def _run_impl(
     config: EvidenceConditionedConfig, backend: ChatBackend | None = None
 ) -> dict[str, Any]:
     _validate_config(config)
@@ -752,6 +787,45 @@ def run(
     if status == "generation_complete":
         (output_dir / "GENERATION_COMPLETE").write_text(signature + "\n", encoding="utf-8")
     return {"status": status, "output_dir": str(output_dir), "manifest": manifest}
+
+
+def _record_terminal_failure(output_dir: Path, error: Exception) -> None:
+    checkpoint_path = output_dir / "checkpoint.json"
+    checkpoint_data: dict[str, Any] = {}
+    if checkpoint_path.exists():
+        checkpoint_data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    unresolved = [
+        {"operation_key": key, **value}
+        for key, value in sorted(checkpoint_data.get("failures", {}).items())
+    ]
+    _write_jsonl(output_dir / "unresolved_errors.jsonl", unresolved)
+
+    manifest_path = output_dir / "manifest.json"
+    manifest: dict[str, Any] = {}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({
+        "protocol": manifest.get("protocol", PROTOCOL),
+        "status": "incomplete",
+        "unresolved_records": len(unresolved),
+        "terminal_error": {
+            "error_type": type(error).__name__,
+            "error": str(error)[:500],
+        },
+        "completed_at_utc": _now(),
+    })
+    _write_json(manifest_path, manifest)
+    (output_dir / "GENERATION_COMPLETE").unlink(missing_ok=True)
+
+
+def run(
+    config: EvidenceConditionedConfig, backend: ChatBackend | None = None
+) -> dict[str, Any]:
+    try:
+        return _run_impl(config, backend)
+    except Exception as error:
+        _record_terminal_failure(Path(config.output_dir).resolve(), error)
+        raise
 
 
 def _preflight(output_dir: Path, backend: ChatBackend, expected_model: str) -> dict[str, Any]:

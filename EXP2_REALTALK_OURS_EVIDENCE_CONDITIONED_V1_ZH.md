@@ -20,3 +20,6 @@ Session 3 做因果预测，按 6 -> 24 -> 68 扩大。冻结后正式 Cb 才按
 
 生成与 Ground Truth 在代码中分离；任何 Prompt 构造器只接收 `GenerationInput`。`events_session_*`、
 `qa`、未来消息和当前答案均不得进入 Prompt。所有运行使用新目录，旧结果保持不变。
+
+原始 `D1:1` 类消息 ID 会在不同 Chat 文件重复。所有画像与决策证据使用
+`{Chat文件名}::{session turn_id}` 作为全局唯一 ID；原始 `dia_id` 仅作为并列审计字段保留。

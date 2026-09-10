@@ -19,6 +19,7 @@ from src.experiments.realtalk_evidence_conditioned import (
     prepare_ca_dev,
     prepare_formal_cb,
     run,
+    tag_source,
 )
 from src.experiments.realtalk_evidence_schemas import (
     DECISION_SCHEMA,
@@ -150,9 +151,20 @@ class FakeBackend:
         )
 
 
+class InvalidStructuredBackend(FakeBackend):
+    def chat(self, *args, **kwargs):
+        if kwargs.get("max_tokens") == 8:
+            return super().chat(*args, **kwargs)
+        return ChatResult(
+            content="not valid json", model=self.model, prompt_tokens=10,
+            completion_tokens=3, latency_seconds=0.01, attempts=1,
+            reasoning_content="", finish_reason="stop", response_id="bad-id",
+        )
+
+
 class EvidenceSchemaTests(unittest.TestCase):
     def test_schemas_are_strict_and_accept_sparse_profiles(self):
-        self_value = normalize_self_domain(_self_value("D1:1"))
+        self_value = normalize_self_domain(_self_value("Chat.json::session_1:turn_0"))
         user_value = normalize_user_domain(empty_user_domain())
         decision = normalize_decision(_decision_value())
         self.assertEqual(self_value["self_claims"][0]["confidence"], 0.8)
@@ -167,7 +179,8 @@ class EvidenceSchemaTests(unittest.TestCase):
     def test_evidence_validation_rejects_wrong_speaker_or_future_ids(self):
         with self.assertRaisesRegex(ValueError, "invalid evidence IDs"):
             validate_evidence_ids(
-                normalize_self_domain(_self_value("FUTURE:1")), {"D1:1"}
+                normalize_self_domain(_self_value("future.json::session_1:turn_0")),
+                {"Chat.json::session_1:turn_0"},
             )
 
 
@@ -205,8 +218,6 @@ class EvidenceDataTests(unittest.TestCase):
     def test_prompts_do_not_receive_target_or_future_and_dev_text_is_not_duplicated(self):
         item = self.dev[0]
         point = item["points"][0]
-        future = dict(item["current_turns"][-1])
-        future["content"] = "FUTURE_SENTINEL"
         target = dict(point["target"])
         target["content"] = "GROUND_TRUTH_SENTINEL"
         safe_point = {**point, "target": target}
@@ -216,13 +227,24 @@ class EvidenceDataTests(unittest.TestCase):
         actor_text = actor_prompt(generation_input, self_domain, _decision_value())
         joined = decision_text + actor_text
         self.assertNotIn("GROUND_TRUTH_SENTINEL", joined)
-        self.assertNotIn("FUTURE_SENTINEL", joined)
+        self.assertNotIn(point["target"]["source_id"], joined)
         first_reference_content = item["reference_turns"][0]["content"]
         self.assertEqual(decision_text.count(first_reference_content), 1)
         self.assertEqual(actor_text.count(first_reference_content), 1)
         self.assertNotIn('"lambda_trace"', actor_text)
         self.assertNotIn('"alignment"', actor_text)
         self.assertNotIn('"update_summary"', actor_text)
+
+    def test_evidence_ids_are_namespaced_by_file(self):
+        raw = [{
+            "turn_id": "session_1:turn_0", "session_id": "session_1",
+            "speaker": "Emi", "content": "hello", "dia_ids": ["D1:1"],
+        }]
+        left = tag_source(raw, "Chat_1.json")
+        right = tag_source(raw, "Chat_4.json")
+        self.assertEqual(evidence_ids(left), {"Chat_1.json::session_1:turn_0"})
+        self.assertEqual(evidence_ids(right), {"Chat_4.json::session_1:turn_0"})
+        self.assertTrue(evidence_ids(left).isdisjoint(evidence_ids(right)))
 
     def test_formal_actor_has_reference_and_current_history_once_each(self):
         item = self.formal[0]
@@ -272,6 +294,24 @@ class EvidencePipelineTests(unittest.TestCase):
                 call for call in continuation.calls
                 if call["schema"] is None and call["max_tokens"] == 1024
             ]), 18)
+
+    def test_exhausted_operation_writes_incomplete_failure_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "failed"
+            with self.assertRaises(ValueError):
+                run(EvidenceConditionedConfig(
+                    dataset_dir=str(DATASET), output_dir=str(output),
+                    mode="ca-dev", gate=6, fresh=True,
+                ), InvalidStructuredBackend())
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            unresolved = [
+                json.loads(line) for line in
+                (output / "unresolved_errors.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(manifest["status"], "incomplete")
+            self.assertEqual(manifest["unresolved_records"], 1)
+            self.assertEqual(unresolved[0]["operation_key"], "self:emi")
+            self.assertFalse((output / "GENERATION_COMPLETE").exists())
 
     def test_actor_prompt_is_identity_driven_and_metric_free(self):
         system = ACTOR_SYSTEM_TEMPLATE.format(speaker="Emi")
