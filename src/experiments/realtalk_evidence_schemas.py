@@ -5,6 +5,12 @@ from typing import Any
 
 
 PROFILE_LAYERS = ("core", "regulation", "cognition", "identity", "behavior")
+SELF_SECTION_LIMITS = {
+    "self_claims": 12,
+    "voice": 6,
+    "social_dispositions": 6,
+    "uncertainties": 8,
+}
 
 
 def _strings_schema(*, min_items: int = 0) -> dict[str, Any]:
@@ -26,13 +32,14 @@ def _evidenced_item(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 SELF_DOMAIN_SCHEMA = {
-    "name": "realtalk_evidence_conditioned_self_domain_v1",
+    "name": "realtalk_evidence_conditioned_self_domain_v1_2",
     "strict": True,
     "schema": {
         "type": "object",
         "properties": {
             "self_claims": {
                 "type": "array",
+                "maxItems": SELF_SECTION_LIMITS["self_claims"],
                 "items": _evidenced_item({
                     "value": {"type": "string"},
                     "temporal_scope": {"type": "string"},
@@ -40,16 +47,20 @@ SELF_DOMAIN_SCHEMA = {
             },
             "voice": {
                 "type": "array",
+                "maxItems": SELF_SECTION_LIMITS["voice"],
                 "items": _evidenced_item({"observation": {"type": "string"}}),
             },
             "social_dispositions": {
                 "type": "array",
+                "maxItems": SELF_SECTION_LIMITS["social_dispositions"],
                 "items": _evidenced_item({
                     "observation": {"type": "string"},
                     "observed_context": {"type": "string"},
                 }),
             },
-            "uncertainties": _strings_schema(),
+            "uncertainties": {
+                **_strings_schema(), "maxItems": SELF_SECTION_LIMITS["uncertainties"]
+            },
         },
         "required": [
             "self_claims", "voice", "social_dispositions", "uncertainties"
@@ -152,9 +163,13 @@ def empty_user_domain() -> dict[str, Any]:
 def normalize_self_domain(value: Any) -> dict[str, Any]:
     root = _exact(value, SELF_DOMAIN_SCHEMA["schema"], "self_domain")
     result: dict[str, Any] = {"uncertainties": _strings(root["uncertainties"], "uncertainties")}
+    if len(result["uncertainties"]) > SELF_SECTION_LIMITS["uncertainties"]:
+        raise ValueError("uncertainties exceeds maxItems")
     for section in ("self_claims", "voice", "social_dispositions"):
         if not isinstance(root[section], list):
             raise ValueError(f"{section} must be an array")
+        if len(root[section]) > SELF_SECTION_LIMITS[section]:
+            raise ValueError(f"{section} exceeds maxItems")
         schema = SELF_DOMAIN_SCHEMA["schema"]["properties"][section]["items"]
         result[section] = []
         for index, raw in enumerate(root[section]):

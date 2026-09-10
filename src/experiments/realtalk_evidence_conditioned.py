@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_1"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_2"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -63,6 +63,10 @@ Separate the target's own claims from the partner's words. Record identity claim
 self-descriptions, not independently verified truth. Describe voice and interaction tendencies only when
 the target's messages support them. A tendency observed with this one partner is context-bound unless the
 evidence itself supports a broader claim. Leave unsupported traits out and preserve uncertainty.
+Keep this as a compact transferable model, not a transcript inventory. Consolidate related evidence and
+prioritize identity/background that remains useful beyond one moment: at most 12 self claims, 6 voice
+observations, 6 social dispositions, and 8 uncertainties. Put one-off activities in temporal scope rather
+than expanding every conversational detail into its own claim.
 Return only the strict JSON schema. Do not draft a reply or invent example quotations."""
 
 SELF_USER_TEMPLATE = """TARGET SPEAKER: {speaker}
