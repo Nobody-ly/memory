@@ -17,8 +17,8 @@ mkdir -p "${output_root}"
 
 v9_matched_predictions="${output_root}/v9_predictions_matched.jsonl"
 jq -c --slurpfile selected "${v15_predictions}" '
-  ($selected | map(.result_id) | INDEX(.)) as $wanted
-  | select($wanted[.result_id])
+  ($selected | map(.result_id)) as $wanted
+  | select(.result_id as $id | $wanted | index($id))
 ' "${v9_predictions}" > "${v9_matched_predictions}"
 
 expected_count="$(wc -l < "${v15_predictions}")"
@@ -39,8 +39,8 @@ v9_scored_source="$(dirname "${v9_judge_checkpoint}")/scored.jsonl"
 if [[ -f "${v9_scored_source}" ]]; then
   mkdir -p "${output_root}/v9_judge"
   jq -c --slurpfile selected "${v15_predictions}" '
-    ($selected | map(.result_id) | INDEX(.)) as $wanted
-    | select($wanted[.result_id])
+    ($selected | map(.result_id)) as $wanted
+    | select(.result_id as $id | $wanted | index($id))
   ' "${v9_scored_source}" > "${output_root}/v9_judge/scored.jsonl"
   v9_scored_count="$(wc -l < "${output_root}/v9_judge/scored.jsonl")"
   if [[ "${v9_scored_count}" -ne "${expected_count}" ]]; then
