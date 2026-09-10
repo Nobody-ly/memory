@@ -809,6 +809,7 @@ def _structured_call(
     raw_audit: Path,
     enable_thinking: bool,
     hard_timeout_seconds: int = 0,
+    repair_raw_chars: int = 12000,
 ) -> dict[str, Any]:
     repair = {"raw": "", "error": ""}
     logical_attempt = {"value": 0}
@@ -817,8 +818,13 @@ def _structured_call(
         logical_attempt["value"] += 1
         prompt = user_prompt
         if repair["error"]:
+            previous = (
+                repair["raw"][:repair_raw_chars]
+                if repair_raw_chars > 0
+                else "[omitted; regenerate the complete compact object from the original input]"
+            )
             prompt += FORMAT_REPAIR_TEMPLATE.format(
-                error=repair["error"], raw=repair["raw"][:12000]
+                error=repair["error"], raw=previous
             )
         return _call_with_hard_timeout(
             lambda: backend.chat(

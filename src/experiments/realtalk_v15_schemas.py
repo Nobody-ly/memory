@@ -314,6 +314,19 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
                 "prior consideration or plans"
             )
 
+    decision_basis = _text(alignment["decision_basis"], "alignment.decision_basis")
+    if len(decision_basis.split()) > 120:
+        raise ValueError("alignment.decision_basis must contain at most 120 words")
+    for index, unit in enumerate(normalized_units):
+        if len(unit["content_slot"].split()) > 40:
+            raise ValueError(
+                f"turn_plan.turn_units[{index}].content_slot must contain at most 40 words"
+            )
+        if len(unit["question_target"].split()) > 40:
+            raise ValueError(
+                f"turn_plan.turn_units[{index}].question_target must contain at most 40 words"
+            )
+
     return {
         "situation": {
             "partner_act": partner_act,
@@ -329,7 +342,7 @@ def normalize_v15_decision(value: Any) -> dict[str, Any]:
             "lambda_trace": round(lambda_trace, 4),
             "adaptation_source": source,
             "affected_dimensions": normalized_affected,
-            "decision_basis": _text(alignment["decision_basis"], "alignment.decision_basis"),
+            "decision_basis": decision_basis,
         },
         "turn_plan": {
             "turn_units": normalized_units,

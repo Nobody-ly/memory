@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_14_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_15_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -98,6 +98,11 @@ target has a home office and separate evidence about cold weather or illness doe
 the target's office is cold. Likewise, a partner's anecdote does not license a parallel target anecdote merely
 because isolated words or concepts also occur somewhere in target history. When the relation itself is not
 target-owned, acknowledge or comment on the partner's experience without inventing reciprocity.
+Every target autobiographical relation in a content_slot must be supported as a whole by one target-owned
+visible statement or one stable Self Domain item. Do not assemble its pieces from separate evidence. An
+acknowledge unit contains only the reaction to the partner; it must not hide a target self-disclosure in the
+same content_slot. If a supported self-disclosure is genuinely necessary, put it in a separate self-disclose
+unit so its evidence requirement remains visible.
 Then make one coherent turn plan containing one to six chat-bubble units. A unit has exactly one communicative
 act. Multiple units may repeat an act when the target's chat rhythm naturally splits one contribution across
 bubbles. Do not add acknowledgement, explanation,
@@ -176,7 +181,9 @@ INDEXED USER DOMAIN ACTIVATION WHITELIST:
 
 Plan the next turn as {speaker}. Ca supplies a weak cross-partner prior; the complete visible history and
 current Cb evidence determine the present interaction. Return only selected fact_id values from the
-whitelist, or return an empty relevant_user_domain array."""
+whitelist, or return an empty relevant_user_domain array. Keep the object compact: decision_basis must be at
+most 120 words, every topic/content_slot/question_target at most 40 words, and the complete JSON below 900
+tokens. Do not quote the prompt, enumerate every statistic, repeat a reason, or omit schema fields."""
 
 
 ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
@@ -367,6 +374,7 @@ def run_v15(config: V15Config, backend: ChatBackend | None = None) -> dict[str, 
                 raw_audit=raw_audit,
                 enable_thinking=False,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
+                repair_raw_chars=0,
             )
             decision = decision_envelope["data"]
             actor_result = _run_actor_with_contract_retries(
@@ -702,7 +710,7 @@ def _fact_ownership_audit(
 
 def _distinctive_tokens(text: str) -> set[str]:
     stop = {
-        "about", "after", "again", "also", "because", "been", "being", "could",
+        "about", "after", "again", "also", "always", "because", "been", "being", "could",
         "from", "have", "just", "really", "that", "their", "there", "these", "they",
         "this", "those", "what", "when", "where", "which", "with", "would", "your",
         "glad", "it's",

@@ -498,6 +498,9 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("do not answer every question mechanically", controller)
         self.assertIn("do not combine separate target facts", controller)
         self.assertIn("home office", controller)
+        self.assertIn("supported as a whole", controller)
+        self.assertIn("must not hide a target self-disclosure", controller)
+        self.assertIn("most 120 words", CONTROLLER_USER_TEMPLATE)
 
     def test_controller_can_represent_closing_praise(self):
         self.assertIn("praise-or-encouragement", PARTNER_ACTS)
@@ -574,6 +577,16 @@ class RealTalkV15Tests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "unique array"):
             normalize_v15_decision(duplicate)
+
+        verbose = _decision()
+        verbose["alignment"]["decision_basis"] = "word " * 121
+        with self.assertRaisesRegex(ValueError, "at most 120 words"):
+            normalize_v15_decision(verbose)
+
+        verbose = _decision()
+        verbose["turn_plan"]["turn_units"][0]["content_slot"] = "word " * 41
+        with self.assertRaisesRegex(ValueError, "at most 40 words"):
+            normalize_v15_decision(verbose)
 
     def test_actor_contract_has_one_bubble_per_unit(self):
         audit = actor_structure_audit(

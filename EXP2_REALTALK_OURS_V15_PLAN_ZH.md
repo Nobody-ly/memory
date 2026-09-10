@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_14_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_15_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -109,6 +109,19 @@ Ground Truth、Judge 或 V9 生成结果；它只提醒 Controller 不要把伙�
 
 输出后原有事实归属审计继续作为阻断检查。V15.14 必须重新完成 Ca 6、Ca 30 和 Cb 6，不能
 复用 V15.13 的生成结果。
+
+## 8. V15.15 Controller 可靠性修正
+
+V15.14 的 Ca 6/30 均通过；Cb Gate 6 在 4/6 停止。Emi 的 Controller 已正确识别不受支持的
+New York 前提，但重复复述行为统计直至 1600-token 上限，三次均形成截断 JSON。Muhhamed 的
+Controller 则把确认和未经整体证据支持的“我的办公室也很冷”自我披露塞进同一 acknowledge
+单元，随后被事实归属审计正确阻断。
+
+V15.15 要求 `decision_basis` 不超过 120 词、各计划槽不超过 40 词、完整 JSON 不超过 900
+token，且本地 Schema 校验同样执行前两项上限。Controller 的格式修复仍携带具体解析错误，
+但不再把已截断的超长坏 JSON 回灌给模型。每个自传关系必须由一条目标人物发言或一个稳定
+Self Domain 项整体支持；acknowledge 单元不得隐藏 self-disclose 动作。该修改不增加模型调用、
+不读取未来或 Judge，也不改数据和 V9 上游状态。V15.15 从 Ca 6 重新开始。
 
 ## 7. V15.1 实施审计记录
 

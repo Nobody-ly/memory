@@ -78,7 +78,7 @@ from .realtalk_v15 import (
 from .realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
 
 
-PROTOCOL = "realtalk_task1_ours_v15_14_ca_internal_development"
+PROTOCOL = "realtalk_task1_ours_v15_15_ca_internal_development"
 GATES = (6, 30)
 
 CA_DEV_USER_DOMAIN_SCHEMA = copy.deepcopy(USER_DOMAIN_SCHEMA)
@@ -205,6 +205,7 @@ def run_v15_ca_dev(
                 raw_audit=raw_audit,
                 enable_thinking=False,
                 hard_timeout_seconds=config.model_call_timeout_seconds,
+                repair_raw_chars=0,
             )
             self_domains[speaker] = self_envelope["data"]
             domain = empty_user_domain()
