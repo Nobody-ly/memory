@@ -386,6 +386,30 @@ class RealTalkV15Tests(unittest.TestCase):
             mirrored_office_weather["mirrored_concept_pairs"],
         )
 
+        external_opinion = _fact_ownership_audit(
+            "I think the original Japanese Godzilla movies feel more serious.",
+            {"content": "Japanese Godzilla movies are much better."},
+            [],
+            "Target",
+        )
+        self.assertFalse(external_opinion["warning"])
+
+        tentative_future = _fact_ownership_audit(
+            "A YouTube channel could be interesting too, I'll think about it.",
+            {"content": "You should start a YouTube channel."},
+            [],
+            "Target",
+        )
+        self.assertFalse(tentative_future["warning"])
+
+        backdated_suggestion = _fact_ownership_audit(
+            "I've already been planning a YouTube channel for a while.",
+            {"content": "You should start a YouTube channel."},
+            [],
+            "Target",
+        )
+        self.assertTrue(backdated_suggestion["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},

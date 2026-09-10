@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_7_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_8_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -621,6 +621,8 @@ def _fact_ownership_audit(
         )
         if not first_person:
             continue
+        if _is_external_opinion_clause(clause) or _is_tentative_future_reaction(clause):
+            continue
         overlap = sorted((_distinctive_tokens(clause) & partner_tokens) - prior_tokens)
         clause_concepts = _ownership_concepts(clause)
         partner_concepts = set().union(*partner_concept_sets) if partner_concept_sets else set()
@@ -676,6 +678,30 @@ def _distinctive_tokens(text: str) -> set[str]:
         token for token in re.findall(r"[a-z][a-z'-]{3,}", text.casefold())
         if token not in stop
     }
+
+
+def _is_external_opinion_clause(clause: str) -> bool:
+    remainder = re.sub(
+        r"^\s*(?:i\s+(?:think|believe|guess|feel)|in\s+my\s+opinion|to\s+me)\b[, ]*",
+        "",
+        clause,
+        flags=re.I,
+    )
+    if remainder == clause:
+        return False
+    return not bool(re.search(r"\b(?:i|i'm|i've|i'd|i'll|me|my|mine)\b", remainder, re.I))
+
+
+def _is_tentative_future_reaction(clause: str) -> bool:
+    if re.search(r"\b(?:i've|i\s+have|already|before|used\s+to|for\s+a\s+while)\b", clause, re.I):
+        return False
+    return bool(re.search(
+        r"\b(?:i'll\s+(?:think|consider|try|look|check)|"
+        r"i\s+(?:might|may|could|would)\s+(?:consider|try|look|check)|"
+        r"i'm\s+(?:considering|thinking\s+about))\b",
+        clause,
+        re.I,
+    ))
 
 
 _OWNERSHIP_CONCEPT_PATTERNS = {

@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_7_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_8_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -200,3 +200,14 @@ Schema 没有表示赞美或鼓励的伙伴动作。
 V15.7 新增 `praise-or-encouragement`，明确当合并伙伴轮次以赞美收尾且没有更晚的待答问题时，
 当前义务应为 `acknowledge`，不能把对目标人物的赞美误判成伙伴寻求支持。Schema、协议和 Prompt
 同步升级，并从全新 Ca Gate 6 重新开始。
+
+### V15.8 归属审计语义校准
+
+V15.7 正确把 Muhhamed 的伙伴结尾识别为赞美，并规划了简短 acknowledge；但 Ca Gate 6 被
+两个审计误报阻断：其一是 Akib 对 Godzilla 电影的外部观点，其二是 Muhhamed 对 YouTube
+建议的未来考虑。这两者都不是把伙伴事实冒充成目标人物既有经历。
+
+V15.8 保持 Controller、Schema 和 Actor Prompt 不变，仅让确定性审计放行两类合法表达：没有
+第二个第一人称主张的外部观点，以及不含“以前/已经/一段时间”等倒签标记的暂定未来反应。
+对“我早已计划开 YouTube 频道”等倒签陈述仍然阻断。协议和 Ca runner 标识同步升级，并从
+Ca Gate 6 重新验证。
