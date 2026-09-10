@@ -13,14 +13,25 @@ SELF_SECTION_LIMITS = {
 }
 
 
-def _strings_schema(*, min_items: int = 0) -> dict[str, Any]:
-    return {"type": "array", "items": {"type": "string"}, "minItems": min_items}
+def _strings_schema(
+    *, min_items: int = 0, max_items: int | None = None,
+    item_max_length: int | None = None,
+) -> dict[str, Any]:
+    item_schema: dict[str, Any] = {"type": "string"}
+    if item_max_length is not None:
+        item_schema["maxLength"] = item_max_length
+    schema: dict[str, Any] = {
+        "type": "array", "items": item_schema, "minItems": min_items
+    }
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    return schema
 
 
 def _evidenced_item(properties: dict[str, Any]) -> dict[str, Any]:
     fields = {
         **properties,
-        "evidence_ids": _strings_schema(min_items=1),
+        "evidence_ids": _strings_schema(min_items=1, max_items=4),
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     }
     return {
@@ -32,7 +43,7 @@ def _evidenced_item(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 SELF_DOMAIN_SCHEMA = {
-    "name": "realtalk_evidence_conditioned_self_domain_v1_2",
+    "name": "realtalk_evidence_conditioned_self_domain_v1_3",
     "strict": True,
     "schema": {
         "type": "object",
@@ -41,25 +52,30 @@ SELF_DOMAIN_SCHEMA = {
                 "type": "array",
                 "maxItems": SELF_SECTION_LIMITS["self_claims"],
                 "items": _evidenced_item({
-                    "value": {"type": "string"},
-                    "temporal_scope": {"type": "string"},
+                    "value": {"type": "string", "maxLength": 240},
+                    "temporal_scope": {"type": "string", "maxLength": 120},
                 }),
             },
             "voice": {
                 "type": "array",
                 "maxItems": SELF_SECTION_LIMITS["voice"],
-                "items": _evidenced_item({"observation": {"type": "string"}}),
+                "items": _evidenced_item({
+                    "observation": {"type": "string", "maxLength": 240}
+                }),
             },
             "social_dispositions": {
                 "type": "array",
                 "maxItems": SELF_SECTION_LIMITS["social_dispositions"],
                 "items": _evidenced_item({
-                    "observation": {"type": "string"},
-                    "observed_context": {"type": "string"},
+                    "observation": {"type": "string", "maxLength": 240},
+                    "observed_context": {"type": "string", "maxLength": 160},
                 }),
             },
             "uncertainties": {
-                **_strings_schema(), "maxItems": SELF_SECTION_LIMITS["uncertainties"]
+                **_strings_schema(
+                    max_items=SELF_SECTION_LIMITS["uncertainties"],
+                    item_max_length=240,
+                )
             },
         },
         "required": [
@@ -161,10 +177,14 @@ def empty_user_domain() -> dict[str, Any]:
 
 
 def normalize_self_domain(value: Any) -> dict[str, Any]:
-    root = _exact(value, SELF_DOMAIN_SCHEMA["schema"], "self_domain")
-    result: dict[str, Any] = {"uncertainties": _strings(root["uncertainties"], "uncertainties")}
-    if len(result["uncertainties"]) > SELF_SECTION_LIMITS["uncertainties"]:
-        raise ValueError("uncertainties exceeds maxItems")
+    root_schema = SELF_DOMAIN_SCHEMA["schema"]
+    root = _exact(value, root_schema, "self_domain")
+    result: dict[str, Any] = {
+        "uncertainties": _strings_for_schema(
+            root["uncertainties"], root_schema["properties"]["uncertainties"],
+            "uncertainties",
+        )
+    }
     for section in ("self_claims", "voice", "social_dispositions"):
         if not isinstance(root[section], list):
             raise ValueError(f"{section} must be an array")
@@ -174,16 +194,20 @@ def normalize_self_domain(value: Any) -> dict[str, Any]:
         result[section] = []
         for index, raw in enumerate(root[section]):
             item = _exact(raw, schema, f"{section}[{index}]")
-            normalized = {
-                key: (
-                    _strings(item[key], f"{section}[{index}].{key}")
-                    if key == "evidence_ids"
-                    else _confidence(item[key], f"{section}[{index}].{key}")
-                    if key == "confidence"
-                    else _text(item[key], f"{section}[{index}].{key}")
-                )
-                for key in schema["required"]
-            }
+            normalized = {}
+            for key in schema["required"]:
+                path = f"{section}[{index}].{key}"
+                property_schema = schema["properties"][key]
+                if key == "evidence_ids":
+                    normalized[key] = _strings_for_schema(
+                        item[key], property_schema, path
+                    )
+                elif key == "confidence":
+                    normalized[key] = _confidence(item[key], path)
+                else:
+                    normalized[key] = _text_for_schema(
+                        item[key], property_schema, path
+                    )
             result[section].append(normalized)
     return result
 
@@ -200,8 +224,10 @@ def normalize_user_domain(value: Any) -> dict[str, Any]:
             item = _exact(raw, PROFILE_FACT_SCHEMA, f"{layer}[{index}]")
             fact = {
                 "value": _text(item["value"], f"{layer}[{index}].value"),
-                "evidence_ids": _strings(
-                    item["evidence_ids"], f"{layer}[{index}].evidence_ids"
+                "evidence_ids": _strings_for_schema(
+                    item["evidence_ids"],
+                    PROFILE_FACT_SCHEMA["properties"]["evidence_ids"],
+                    f"{layer}[{index}].evidence_ids",
                 ),
                 "confidence": _confidence(
                     item["confidence"], f"{layer}[{index}].confidence"
@@ -319,6 +345,30 @@ def _strings(value: Any, path: str) -> list[str]:
         text = _text(item, f"{path}[{index}]")
         if text not in result:
             result.append(text)
+    return result
+
+
+def _text_for_schema(value: Any, schema: dict[str, Any], path: str) -> str:
+    text = _text(value, path)
+    maximum = schema.get("maxLength")
+    if maximum is not None and len(text) > maximum:
+        raise ValueError(f"{path} exceeds maxLength={maximum}")
+    return text
+
+
+def _strings_for_schema(
+    value: Any, schema: dict[str, Any], path: str
+) -> list[str]:
+    result = _strings(value, path)
+    minimum = schema.get("minItems", 0)
+    maximum = schema.get("maxItems")
+    if len(result) < minimum:
+        raise ValueError(f"{path} has fewer than minItems={minimum}")
+    if maximum is not None and len(result) > maximum:
+        raise ValueError(f"{path} exceeds maxItems={maximum}")
+    item_schema = schema.get("items", {})
+    for index, item in enumerate(result):
+        _text_for_schema(item, item_schema, f"{path}[{index}]")
     return result
 
 

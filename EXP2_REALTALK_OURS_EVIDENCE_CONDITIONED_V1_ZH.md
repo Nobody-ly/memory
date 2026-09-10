@@ -1,6 +1,6 @@
 # REALTALK Ours Evidence-Conditioned V1
 
-状态：实现锚点。协议：`realtalk_task1_ours_evidence_conditioned_v1_2`。
+状态：实现锚点。协议：`realtalk_task1_ours_evidence_conditioned_v1_3`。
 
 该实现依据 `D:/codex_workspace/realtalk-from-zero-research-20260910/RESEARCH_AND_DESIGN_ZH.md`
 与 `EXECUTOR_PLAN_ZH.md`，从任务和公开数据重新设计，不继承 V9-V15 的 Self/User/Decision 产物。
@@ -31,3 +31,6 @@ V1.1 向 Decision 和 Actor 显式披露目标点所在 Session、该 Session �
 V1.2 将 Self Domain 固定为紧凑的可迁移表示：最多 12 条 self claim、6 条 voice、6 条
 social disposition 和 8 条 uncertainty。相关证据需合并，一次性活动通过 temporal scope 限定；
 完整 Ca 原文仍然向后续模型披露，因此这不是历史裁剪。
+
+V1.3 每个画像条目最多保留 4 个代表性 source ID，并限制画像字段长度。证据白名单、完整原文和
+原始响应仍完整保存；限制的是重复索引与冗长释义，不是可见历史。

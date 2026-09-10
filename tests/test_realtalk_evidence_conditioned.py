@@ -181,6 +181,11 @@ class EvidenceSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "self_claims exceeds maxItems"):
             normalize_self_domain(too_many)
 
+        too_much_evidence = _self_value("Chat.json::session_1:turn_0")
+        too_much_evidence["voice"][0]["evidence_ids"] = [f"id-{i}" for i in range(5)]
+        with self.assertRaisesRegex(ValueError, "evidence_ids exceeds maxItems=4"):
+            normalize_self_domain(too_much_evidence)
+
     def test_evidence_validation_rejects_wrong_speaker_or_future_ids(self):
         with self.assertRaisesRegex(ValueError, "invalid evidence IDs"):
             validate_evidence_ids(
