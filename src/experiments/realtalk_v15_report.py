@@ -300,6 +300,20 @@ def _markdown(report: dict[str, Any]) -> str:
         "intimacy_absolute_difference": "Intimacy AD",
         "empathy_absolute_difference": "Empathy AD",
     }
+    table_keys = (
+        "rouge_l",
+        "bertscore_f1",
+        "reflectiveness_accuracy",
+        "grounding_accuracy",
+        "sentiment_accuracy",
+        "emotion_accuracy",
+        "intimacy_absolute_difference",
+        "empathy_absolute_difference",
+    )
+    paper_keys = (
+        "lexical", "semantic", "reflective", "grounding",
+        "sentiment", "emotion", "intimacy", "empathy",
+    )
     lines = [
         "# REALTALK V9 / V15 Paired Report",
         "",
@@ -316,10 +330,30 @@ def _markdown(report: dict[str, Any]) -> str:
         )
     lines.extend([
         "",
+        "## Table 2 Context",
+        "",
+        "| Method | ROUGE | BERTScore | Reflectiveness | Grounding | Sentiment | Emotion | Intimacy AD | Empathy AD |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for method, row in report["paper_table2"].items():
+        lines.append(
+            f"| Paper {method} | "
+            + " | ".join(row[key] for key in paper_keys)
+            + " |"
+        )
+    for method, side in (("V9 matched gate", "v9"), ("V15 matched gate", "v15")):
+        lines.append(
+            f"| {method} | "
+            + " | ".join(f"{report['speaker_macro'][key][side]:.3f}" for key in table_keys)
+            + " |"
+        )
+    lines.extend([
+        "",
         f"Gate passed: {report['gate_decision']['passed']}",
         "",
         "Positive signed improvement always favors V15; AD metrics are direction-reversed.",
         "This is a protocol-aligned exploratory comparison.",
+        "Paper rows are the published full-test mean +/- population standard deviation; V9/V15 rows are matched gate speaker-macro means.",
     ])
     return "\n".join(lines) + "\n"
 

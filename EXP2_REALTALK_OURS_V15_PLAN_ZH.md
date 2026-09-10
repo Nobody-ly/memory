@@ -144,6 +144,33 @@ V15.17 将明确的第一人称否定声明排除出“采用伙伴事实”告�
 问题前提不受支持、而最后一个问题可以独立回答时，Controller 必须静默略过早期问题，不为纠正
 而主动复述该实体。只有剩余问题无法连贯回答时才纠正前提。该修改不放宽任何正向自传事实。
 
+## 11. V15.17 渐进结果与停止决定
+
+- Ca Gate 6：6/6，零 unresolved，零事实归属警告。
+- Ca Gate 30：30/30，零 unresolved，零事实归属警告。
+- Cb Gate 6：6/6；Cb Gate 18：18/18；Cb Gate 30：30/30，均为零 unresolved 和零事实归属警告。
+- Gate 30 使用与 V15 完全相同 ID 的 V9 子集、共享 canonical V9 Ground Truth Judge 标签，
+  并采用论文 Appendix C Prompt 与 `gpt-4o-mini`。
+
+Gate 30 speaker-macro 配对结果：
+
+| 指标 | V9 | V15.17 | V15.17 改善方向值 |
+|---|---:|---:|---:|
+| ROUGE | 0.137 | 0.130 | -0.007 |
+| BERTScore | 0.853 | 0.846 | -0.008 |
+| Reflectiveness | 0.633 | 0.733 | +0.100 |
+| Grounding | 0.567 | 0.533 | -0.033 |
+| Sentiment | 0.633 | 0.600 | -0.033 |
+| Emotion | 0.467 | 0.500 | +0.033 |
+| Intimacy AD | 0.066 | 0.069 | -0.003 |
+| Empathy AD | 1.267 | 0.833 | +0.433 |
+
+预注册 Gate 30 要求 Reflectiveness、Grounding、Intimacy AD 至少两项改善，并要求 Grounding
+下降不超过 0.03。实际仅 Reflectiveness 改善，Grounding 下降约 0.033，故 Gate 判定为失败。
+V15.17 按计划停止，不运行 Gate 60/120/519。该结果说明新的 Controller 显著改善反思时机和
+Empathy AD，但问题/回应位置仍不足以改善 Grounding，不能把小样本上的部分优势解释为完整
+Table 2 超越。
+
 ## 7. V15.1 实施审计记录
 
 首个冻结 Prompt 版本完成 Ca 30：30/30、零 unresolved、零事实归属警告。随后 Cb Gate 6

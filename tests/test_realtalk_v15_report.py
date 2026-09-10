@@ -90,6 +90,10 @@ class RealTalkV15ReportTests(unittest.TestCase):
                 0,
             )
             self.assertTrue((root / "report" / "paired_report.md").exists())
+            markdown = (root / "report" / "paired_report.md").read_text(encoding="utf-8")
+            self.assertIn("Paper w/ fine-tune", markdown)
+            self.assertIn("V9 matched gate", markdown)
+            self.assertIn("V15 matched gate", markdown)
 
     def test_report_rejects_unaligned_ids(self):
         with tempfile.TemporaryDirectory() as directory:
