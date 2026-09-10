@@ -10,6 +10,7 @@ PARTNER_ACTS = (
     "question",
     "self-disclosure",
     "opinion",
+    "praise-or-encouragement",
     "explicit-affect",
     "support-request",
     "closing",
@@ -113,7 +114,7 @@ TURN_UNIT_SCHEMA = {
 
 
 DECISION_SCHEMA = {
-    "name": "realtalk_ours_v15_cb_posterior_controller_v3",
+    "name": "realtalk_ours_v15_cb_posterior_controller_v4",
     "strict": True,
     "schema": {
         "type": "object",

@@ -32,7 +32,11 @@ from src.experiments.realtalk_v15_ca_dev import (
     _prepare_ca_dev,
     run_v15_ca_dev,
 )
-from src.experiments.realtalk_v15_schemas import DECISION_SCHEMA, normalize_v15_decision
+from src.experiments.realtalk_v15_schemas import (
+    DECISION_SCHEMA,
+    PARTNER_ACTS,
+    normalize_v15_decision,
+)
 
 
 def _decision() -> dict:
@@ -400,6 +404,14 @@ class RealTalkV15Tests(unittest.TestCase):
         self.assertIn("previously", controller)
         self.assertIn("tentative future choice", actor)
         self.assertIn("already considered", actor)
+
+    def test_controller_can_represent_closing_praise(self):
+        self.assertIn("praise-or-encouragement", PARTNER_ACTS)
+        self.assertIn("praise-or-encouragement", CONTROLLER_SYSTEM_PROMPT)
+        decision = _decision()
+        decision["situation"]["partner_act"] = "praise-or-encouragement"
+        decision["situation"]["conversational_obligation"] = "acknowledge"
+        normalize_v15_decision(decision)
 
     def test_v15_actor_self_domain_includes_identity_and_boundaries(self):
         projected = _v15_actor_self_domain(_self_domain())
