@@ -456,6 +456,8 @@ class RealTalkV15Tests(unittest.TestCase):
     def test_controller_can_represent_closing_praise(self):
         self.assertIn("praise-or-encouragement", PARTNER_ACTS)
         self.assertIn("praise-or-encouragement", CONTROLLER_SYSTEM_PROMPT)
+        self.assertIn("pure social acknowledgement", CONTROLLER_SYSTEM_PROMPT)
+        self.assertIn("do not mention, answer, evaluate", CONTROLLER_SYSTEM_PROMPT.casefold())
         decision = _decision()
         decision["situation"]["partner_act"] = "praise-or-encouragement"
         decision["situation"]["conversational_obligation"] = "acknowledge"

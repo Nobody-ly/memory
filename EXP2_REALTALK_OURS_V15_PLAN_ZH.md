@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_11_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_12_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -238,3 +238,11 @@ V15.11 删除通用主题词的 `too/also` 阻断，只保留所有权敏感概�
 同时在 Decision 归一化后强制：`praise-or-encouragement + acknowledge` 只能规划 acknowledge
 单元，且内容不得虚构此前已经考虑或计划过伙伴刚提出的建议。违反时由同一次结构化调用的既有
 重试机制修复，不增加新模型阶段。协议标识同步升级并从 Ca Gate 6 重跑。
+
+### V15.12 纯社交 acknowledge 优先级
+
+V15.11 的一致性校验正确拒绝了错误计划，但三次格式修复都返回相同内容：Decision 理由已经判断
+结尾赞美覆盖了更早问题，`content_slot` 却仍受一般“分享自己”先验影响，继续回答 YouTube
+建议。V15.12 在 Controller 主 Prompt 中明确优先级：当当前动作是结尾赞美且义务为 acknowledge，
+只规划简短感谢或欣赏，不提及、回答、评价、接受或拒绝更早建议，也不增加自我披露、理由或未来
+计划。既有一致性校验继续兜底，不新增调用阶段。协议同步升级并从 Ca Gate 6 重跑。

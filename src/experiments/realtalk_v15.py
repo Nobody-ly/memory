@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_11_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_12_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -83,6 +83,9 @@ not mechanically answer it when the latest move makes a short social response th
 When the closing bubbles recommend something and then praise or encourage the target, classify the active
 partner act as praise-or-encouragement with an acknowledge obligation unless a later explicit question still
 requires an answer. Do not classify praise directed at the target as a support request from the partner.
+For praise-or-encouragement with an acknowledge obligation, plan only a pure social acknowledgement of the
+praise, such as brief thanks or appreciation. Do not mention, answer, evaluate, accept, reject, or discuss the
+feasibility of an earlier suggestion; do not add self-disclosure, a reason, or a future plan in that turn.
 Before accepting any question premise about the target, verify it against the Self Domain and the target's
 own visible Cb statements. If the premise is unsupported or conflicts with target-owned evidence, do not
 adopt it as fact: answer only the supported part, correct it naturally, or ask one clarification when needed.
