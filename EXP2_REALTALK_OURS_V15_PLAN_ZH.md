@@ -2,7 +2,7 @@
 
 ## 1. 实验身份
 
-- 当前协议：`realtalk_task1_ours_v15_15_cb_posterior_controller`
+- 当前协议：`realtalk_task1_ours_v15_16_cb_posterior_controller`
 - 模型：`deepseek-v4-flash`，Controller 与 Actor 均关闭 thinking
 - 基础：冻结 V9 Self Domain、逐样本五层 User Domain 和完整因果历史
 - 重建：重新生成 Behavior Controller 与 Response Actor
@@ -122,6 +122,14 @@ token，且本地 Schema 校验同样执行前两项上限。Controller 的格�
 但不再把已截断的超长坏 JSON 回灌给模型。每个自传关系必须由一条目标人物发言或一个稳定
 Self Domain 项整体支持；acknowledge 单元不得隐藏 self-disclose 动作。该修改不增加模型调用、
 不读取未来或 Judge，也不改数据和 V9 上游状态。V15.15 从 Ca 6 重新开始。
+
+## 9. V15.16 审计语法修正
+
+V15.15 的 Ca Gate 6 通过，Ca Gate 30 在 29/30 停止。唯一失败是审计器把被动结构
+`coding can be used to create...` 中的 `used to` 错当成第一人称过去习惯，尽管该回答已由可见
+目标人物历史支持。V15.16 只把明确的 `I used to` 识别为过去习惯；`be used to create` 不再
+触发回溯声明。Prompt、Schema、数据、模型和解码参数均不变，新增回归测试后从 Ca Gate 6
+重新验证。
 
 ## 7. V15.1 实施审计记录
 

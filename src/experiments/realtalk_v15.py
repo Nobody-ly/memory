@@ -48,7 +48,7 @@ from .realtalk_v15_schemas import DECISION_SCHEMA, QUESTION_ACTS, normalize_v15_
 
 
 MODEL = "deepseek-v4-flash"
-PROTOCOL = "realtalk_task1_ours_v15_15_cb_posterior_controller"
+PROTOCOL = "realtalk_task1_ours_v15_16_cb_posterior_controller"
 GATES = (6, 18, 30, 60, 120, 519)
 
 
@@ -747,7 +747,8 @@ def _is_tentative_future_reaction(clause: str) -> bool:
 
 def _has_backdated_claim_language(clause: str) -> bool:
     return bool(
-        re.search(r"\b(?:already|before|used\s+to|for\s+a\s+while)\b", clause, re.I)
+        re.search(r"\b(?:already|before|for\s+a\s+while)\b", clause, re.I)
+        or re.search(r"\bi\s+used\s+to\b", clause, re.I)
         or re.search(
             r"\b(?:i've|i\s+have)\s+(?:previously\s+)?(?:considered|planned|"
             r"been\s+planning|thought\s+about|started|done|tried|owned)\b",

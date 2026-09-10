@@ -435,6 +435,14 @@ class RealTalkV15Tests(unittest.TestCase):
         )
         self.assertFalse(aligned_preference["warning"])
 
+        passive_used_to = _fact_ownership_audit(
+            "I'm curious about how coding can be used to create interactive stories.",
+            {"content": "Are you curious about using coding to create stories?"},
+            [],
+            "Target",
+        )
+        self.assertFalse(passive_used_to["warning"])
+
     def test_controller_receives_explicit_target_owned_cb_evidence(self):
         turns = [
             {"turn_id": "session_1:turn_0", "session_id": "session_1", "speaker": "Target", "content": "I live in LA."},
