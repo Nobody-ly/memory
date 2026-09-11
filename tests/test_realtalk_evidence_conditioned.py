@@ -80,23 +80,30 @@ def _user_value(evidence_id: str) -> dict:
 
 def _decision_value(evidence_id: str | None = None) -> dict:
     return {
-        "scene": {
-            "conversation_threads": ["the current everyday topic"],
-            "target_current_context": None,
-            "partner_current_state": "The partner is continuing the exchange.",
-            "relationship_context": "An ongoing casual chat.",
-            "uncertainty": "The exact next content is uncertain.",
+        "situation": {
+            "partner_act": "statement",
+            "current_topic": "the current everyday topic",
+            "conversational_obligation": "react",
+            "uncertainty": "low",
         },
         "alignment": {
-            "self_tendency": "Continue in the target's ordinary voice.",
-            "partner_expectation": "A natural continuation.",
+            "orientation": "balanced",
             "lambda_trace": 0.35,
-            "tradeoff": "Keep the person's voice while staying responsive.",
+            "basis": "Keep the person's voice while staying responsive.",
+            "affected_dimensions": ["tone"],
         },
-        "policy": {
-            "intent": "Continue the active topic naturally in character.",
-            "evidence_ids": [evidence_id] if evidence_id else [],
+        "turn_plan": {
+            "bubble_count": 1,
+            "units": [{
+                "act": "react",
+                "content_slot": "Continue the active topic naturally in character.",
+                "question_allowed": False,
+                "self_disclosure_allowed": False,
+            }],
+            "relationship_tone": "casual",
+            "length_band": "short",
         },
+        "evidence_ids": [evidence_id] if evidence_id else [],
     }
 
 
@@ -193,6 +200,18 @@ class EvidenceSchemaTests(unittest.TestCase):
                 normalize_self_domain(_self_value("future.json::session_1:turn_0")),
                 {"Chat.json::session_1:turn_0"},
             )
+
+    def test_v15_turn_plan_is_structural_and_enum_checked(self):
+        value = normalize_decision(_decision_value())
+        self.assertEqual(value["turn_plan"]["bubble_count"], 1)
+        invalid_count = _decision_value()
+        invalid_count["turn_plan"]["bubble_count"] = 2
+        with self.assertRaisesRegex(ValueError, "bubble_count must equal"):
+            normalize_decision(invalid_count)
+        invalid_dimension = _decision_value()
+        invalid_dimension["alignment"]["affected_dimensions"] = ["invented"]
+        with self.assertRaisesRegex(ValueError, "must be one of"):
+            normalize_decision(invalid_dimension)
 
 
 class EvidenceDataTests(unittest.TestCase):

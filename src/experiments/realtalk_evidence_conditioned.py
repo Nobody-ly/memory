@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_4"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_5"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -105,28 +105,25 @@ CUMULATIVE PARTNER EVIDENCE ID WHITELIST:
 Return the updated complete five-layer partner model. Every evidence ID must be copied from the
 whitelist. Preserve well-supported prior facts when they remain consistent."""
 
-DECISION_SYSTEM_PROMPT = """You are the private understanding and alignment step for persona simulation.
+DECISION_SYSTEM_PROMPT = """You are the private behavior controller for persona simulation.
 This is a next-utterance prediction task, not a relationship-improvement or conversation-maximization
-task. Infer the single most probable turn this observed person would actually produce at this exact point.
+task. Infer the most probable message structure this observed person would actually produce at this exact point.
 Understand the current exchange as the target person. Use the reference conversation as evidence of the
 target's identity and voice, and the current conversation as the reality of this particular relationship.
 Distinguish the target person's current context, the partner's current state, and their shared interaction.
 Treat an explicit new-session boundary as a real temporal break: earlier threads remain background, but are
 not automatically the active topic. The boundary does not prescribe a greeting or any other fixed action.
-Weigh the target's own tendencies against the partner's expectations only when those expectations are
+Weigh the target's own tendencies against the current partner only when the current turn makes adaptation
 relevant. lambda_trace records this soft balance: lower means the target's own tendency dominates; higher
-means the conversational intention is more adapted to the current partner. It is not an empathy score,
-profile confidence, reward, or quota, and no value range is preferred.
+means the message structure adapts more to the current exchange. It is not an empathy score, profile
+confidence, reward, or quota. It should vary with the situation and affect at least one planned dimension.
 
-Produce one concise conversational intention. It may naturally involve more than one conversational
-component, but it is not a bubble-by-bubble script, reply draft, question quota, reflection permission, or
-evaluation plan. A plausible turn does not need to ask a question, interpret emotion, praise the partner,
-share a personal update, or keep the exchange going. Select any such component only when the target's
-observed behavior and the immediate conversational obligation make it more likely than a shorter ordinary
-reply. Treat old activities, plans and feelings as background rather than the target's current state unless
-the current session confirms them. An asynchronous conversation can continue an earlier thread rather than
-mechanically answering the latest sentence. Return only the strict JSON schema and do not reconstruct a
-reference answer."""
+Direct questions normally require an answer before any optional continuation. Do not add a follow-up question
+by default. Choose one to three message units only when the target's observed bubble habits and this exact
+conversational obligation support them. Each unit is a content slot, not a draft. The response actor will emit
+exactly the planned number of newline-separated bubbles. Treat old activities, plans and feelings as
+background rather than the target's current state unless the current session confirms them. Return only the
+strict JSON schema and do not reconstruct a reference answer."""
 
 DECISION_FORMAL_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -149,8 +146,11 @@ CURRENT CONVERSATION POSITION (KNOWN BEFORE THE TARGET TEXT):
 VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 {visible_evidence_ids}
 
-Infer the scene, alignment and one conversational intention for {speaker}. The policy evidence_ids may be
-empty; otherwise copy only visible IDs."""
+DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
+{behavior_statistics}
+
+Infer the situation, alignment and turn plan for {speaker}. Evidence IDs may be empty; otherwise copy only
+visible IDs. Answer a direct partner question before optional self-disclosure or follow-up."""
 
 DECISION_DEV_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -172,16 +172,19 @@ CURRENT FIVE-LAYER PARTNER MODEL:
 VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 {visible_evidence_ids}
 
-Infer the scene, alignment and one conversational intention for {speaker}. The policy evidence_ids may be
-empty; otherwise copy only visible IDs."""
+DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
+{behavior_statistics}
+
+Infer the situation, alignment and turn plan for {speaker}. Evidence IDs may be empty; otherwise copy only
+visible IDs. Answer a direct partner question before optional self-disclosure or follow-up."""
 
 ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
-Use the reference conversation and private Self Domain to inhabit this person, and the current
-conversation to understand this particular exchange. Carry the private conversational intention into a
-natural next turn. Predict the person's most likely actual message rather than making the conversation
-deeper, warmer, longer, or easier to continue. Do not add a question, emotional interpretation, praise,
-personal update, or extra topic unless the private intention calls for it. An ordinary short response is
-valid when it best matches the person and this position. Output only the message, not the speaker name."""
+Act as the person represented by the private Self Domain and follow the private turn plan naturally.
+The turn plan is a structure, not a script: write the person's own words in their observed voice. Answer
+the partner's direct question when the plan says answer. Do not invent a second topic, add a question that
+is not permitted by the plan, or explain the private plan. Emit exactly the planned number of non-empty
+message bubbles, one bubble per physical line. Predict the person's most likely actual message. Output only
+the message, not the speaker name."""
 
 ACTOR_FORMAL_TEMPLATE = """REFERENCE CONVERSATION WITH {reference_partner} ({reference_scope}):
 {reference_history}
@@ -195,8 +198,11 @@ CURRENT CONVERSATION TO CONTINUE (REAL HISTORY BEFORE YOUR NEXT TURN):
 CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 {conversation_position}
 
-PRIVATE SCENE AND CONVERSATIONAL INTENTION:
-{scene_and_policy}
+PRIVATE TURN PLAN:
+{turn_plan}
+
+Emit exactly the planned number of non-empty newline-separated message bubbles. Do not include JSON,
+speaker labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -212,8 +218,11 @@ CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 {self_domain}
 
-PRIVATE SCENE AND CONVERSATIONAL INTENTION:
-{scene_and_policy}
+PRIVATE TURN PLAN:
+{turn_plan}
+
+Emit exactly the planned number of non-empty newline-separated message bubbles. Do not include JSON,
+speaker labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -616,7 +625,30 @@ def build_generation_input(
             "observed_turns_in_target_session": observed_in_target_session,
             "starts_new_session": observed_in_target_session == 0,
         },
+        "reference_behavior_statistics": behavior_statistics(
+            item["reference_turns"], item["speaker"]
+        ),
         "user_domain": user_domain,
+    }
+
+
+def behavior_statistics(turns: list[dict[str, Any]], speaker: str) -> dict[str, Any]:
+    """Compute a small, deterministic style prior without exposing Ca examples."""
+    target = [turn for turn in turns if turn.get("speaker") == speaker]
+    if not target:
+        return {
+            "target_message_count": 0, "mean_characters": 0.0,
+            "mean_bubbles": 0.0, "multi_bubble_rate": 0.0,
+            "question_rate": 0.0,
+        }
+    bubble_counts = [max(1, len(str(turn.get("content", "")).splitlines())) for turn in target]
+    character_counts = [len(str(turn.get("content", ""))) for turn in target]
+    return {
+        "target_message_count": len(target),
+        "mean_characters": round(sum(character_counts) / len(character_counts), 3),
+        "mean_bubbles": round(sum(bubble_counts) / len(bubble_counts), 3),
+        "multi_bubble_rate": round(sum(count > 1 for count in bubble_counts) / len(bubble_counts), 3),
+        "question_rate": round(sum("?" in str(turn.get("content", "")) for turn in target) / len(target), 3),
     }
 
 
@@ -635,6 +667,7 @@ def decision_prompt(
             current_history=format_evidence_turns(generation_input["current_turns"]),
             conversation_position=_json(generation_input["conversation_position"]),
             visible_evidence_ids=_json(sorted(visible)),
+            behavior_statistics=_json(generation_input["reference_behavior_statistics"]),
         )
     return DECISION_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"], partner=generation_input["partner"],
@@ -643,6 +676,7 @@ def decision_prompt(
         conversation_position=_json(generation_input["conversation_position"]),
         self_domain=_json(self_domain), user_domain=_json(generation_input["user_domain"]),
         visible_evidence_ids=_json(sorted(visible)),
+        behavior_statistics=_json(generation_input["reference_behavior_statistics"]),
     )
 
 
@@ -650,7 +684,7 @@ def actor_prompt(
     generation_input: dict[str, Any], self_domain: dict[str, Any],
     decision: dict[str, Any],
 ) -> str:
-    scene_and_policy = {"scene": decision["scene"], "policy": decision["policy"]}
+    turn_plan = decision["turn_plan"]
     if generation_input["mode"] == "cb":
         return ACTOR_FORMAL_TEMPLATE.format(
             speaker=generation_input["speaker"],
@@ -660,20 +694,20 @@ def actor_prompt(
             self_domain=_json(self_domain),
             current_history=format_evidence_turns(generation_input["current_turns"]),
             conversation_position=_json(generation_input["conversation_position"]),
-            scene_and_policy=_json(scene_and_policy),
+            turn_plan=_json(turn_plan),
         )
     return ACTOR_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"],
         reference_scope=generation_input["reference_scope"],
         current_history=format_evidence_turns(generation_input["current_turns"]),
         conversation_position=_json(generation_input["conversation_position"]),
-        self_domain=_json(self_domain), scene_and_policy=_json(scene_and_policy),
+        self_domain=_json(self_domain), turn_plan=_json(turn_plan),
     )
 
 
 def _actor_call(
     *, checkpoint: OperationCheckpoint, backend: ChatBackend, operation_key: str,
-    speaker: str, user_prompt: str, raw_audit: Path,
+    speaker: str, user_prompt: str, turn_plan: dict[str, Any], raw_audit: Path,
 ) -> dict[str, Any]:
     system_prompt = ACTOR_SYSTEM_TEMPLATE.format(speaker=speaker)
 
@@ -703,11 +737,20 @@ def _actor_call(
         if re.match(rf"^{re.escape(speaker)}\s*:", message, re.IGNORECASE):
             raise ValueError("actor leaked the speaker label")
         if message.startswith(("{", "[")) or re.search(
-            r'"(?:scene|policy|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
+            r'"(?:situation|turn_plan|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
         ):
             raise ValueError("actor leaked private structure")
+        bubbles = [line.strip() for line in message.splitlines() if line.strip()]
+        expected_bubbles = turn_plan["bubble_count"]
+        if len(bubbles) != expected_bubbles:
+            raise ValueError(
+                f"actor bubble count mismatch: expected {expected_bubbles}, got {len(bubbles)}"
+            )
+        question_allowed = any(unit["question_allowed"] for unit in turn_plan["units"])
+        if not question_allowed and any("?" in bubble for bubble in bubbles):
+            raise ValueError("actor emitted a question when no turn unit allowed one")
         return {
-            "data": message,
+            "data": "\n".join(bubbles),
             "audit": {
                 "model": result.model, "logical_attempts": 1,
                 "thinking_enabled": False, "finish_reason": result.finish_reason,
@@ -717,9 +760,8 @@ def _actor_call(
             },
         }
 
-    # Semantic/structure violations are preserved as failures, not regenerated to taste.
     return checkpoint.execute(
-        operation_key, operation, validate, 1,
+        operation_key, operation, validate, 2,
         usage_supplier=lambda: dict(getattr(backend, "token_usage", {})),
     )
 
@@ -915,6 +957,7 @@ def _run_impl(
             user_prompt=actor_prompt(
                 generation_input, self_domains[item["speaker"]], decision
             ),
+            turn_plan=decision["turn_plan"],
             raw_audit=raw_audit,
         )
         checkpoint.store_result(result_id, {
@@ -947,11 +990,30 @@ def _run_impl(
     _write_jsonl(output_dir / "predictions.jsonl", results)
     _write_jsonl(output_dir / "unresolved_errors.jsonl", unresolved)
     status = "generation_complete" if len(results) == len(selected_ids) and not unresolved else "incomplete"
+    lambda_values = [
+        result["decision"]["alignment"]["lambda_trace"]
+        for result in results
+    ]
+    bubble_counts = [
+        len([line for line in result["generated_message"].splitlines() if line.strip()])
+        for result in results
+    ]
+    generated_question_count = sum("?" in result["generated_message"] for result in results)
     manifest = {
         **manifest_base, "status": status, "run_signature": signature,
         "selected_records": len(selected_ids), "completed_records": len(results),
         "unresolved_records": len(unresolved), "completed_at_utc": _now(),
         "token_usage": getattr(backend, "token_usage", {}),
+        "runtime_behavior_summary": {
+            "lambda_unique_values": sorted(set(lambda_values)),
+            "lambda_min": min(lambda_values) if lambda_values else None,
+            "lambda_max": max(lambda_values) if lambda_values else None,
+            "lambda_mean": round(sum(lambda_values) / len(lambda_values), 6) if lambda_values else None,
+            "generated_bubble_count_distribution": {
+                str(count): bubble_counts.count(count) for count in sorted(set(bubble_counts))
+            },
+            "generated_question_rate": round(generated_question_count / len(results), 6) if results else None,
+        },
     }
     _write_json(output_dir / "manifest.json", manifest)
     if status == "generation_complete":
