@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_5"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_5_1"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -119,7 +119,8 @@ means the message structure adapts more to the current exchange. It is not an em
 confidence, reward, or quota. It should vary with the situation and affect at least one planned dimension.
 
 Direct questions normally require an answer before any optional continuation. Do not add a follow-up question
-by default. Choose one to three message units only when the target's observed bubble habits and this exact
+by default. If a unit permits a question, set question_allowed=true; if it is false, the Actor must not ask
+one even when the basis text discusses a possible reciprocal question. Choose one to three message units only when the target's observed bubble habits and this exact
 conversational obligation support them. Each unit is a content slot, not a draft. The response actor will emit
 exactly the planned number of newline-separated bubbles. Treat old activities, plans and feelings as
 background rather than the target's current state unless the current session confirms them. Return only the
@@ -201,8 +202,9 @@ CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 PRIVATE TURN PLAN:
 {turn_plan}
 
-Emit exactly the planned number of non-empty newline-separated message bubbles. Do not include JSON,
-speaker labels, or internal reasoning.
+Emit exactly the planned number of non-empty newline-separated message bubbles. The question_allowed flags
+are hard permissions: never emit a question mark when every flag is false. Do not include JSON, speaker
+labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -221,8 +223,9 @@ PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 PRIVATE TURN PLAN:
 {turn_plan}
 
-Emit exactly the planned number of non-empty newline-separated message bubbles. Do not include JSON,
-speaker labels, or internal reasoning.
+Emit exactly the planned number of non-empty newline-separated message bubbles. The question_allowed flags
+are hard permissions: never emit a question mark when every flag is false. Do not include JSON, speaker
+labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -710,10 +713,18 @@ def _actor_call(
     speaker: str, user_prompt: str, turn_plan: dict[str, Any], raw_audit: Path,
 ) -> dict[str, Any]:
     system_prompt = ACTOR_SYSTEM_TEMPLATE.format(speaker=speaker)
+    repair_feedback = {"text": ""}
 
     def operation() -> ChatResult:
+        prompt = user_prompt
+        if repair_feedback["text"]:
+            prompt += (
+                "\n\nCONTRACT REPAIR FROM THE PREVIOUS ATTEMPT:\n"
+                + repair_feedback["text"]
+                + "\nRegenerate the same turn plan without changing its permissions."
+            )
         return backend.chat(
-            system_prompt, user_prompt, temperature=0.6, top_p=0.9,
+            system_prompt, prompt, temperature=0.6, top_p=0.9,
             max_tokens=1024, enable_thinking=False,
         )
 
@@ -729,26 +740,30 @@ def _actor_call(
             "finish_reason": result.finish_reason, "response_id": result.response_id,
             "recorded_at_utc": _now(),
         })
-        message = result.content.strip()
-        if not message:
-            raise ValueError("actor returned empty text")
-        if result.finish_reason.casefold() in {"length", "max_tokens"}:
-            raise ValueError("actor output was truncated")
-        if re.match(rf"^{re.escape(speaker)}\s*:", message, re.IGNORECASE):
-            raise ValueError("actor leaked the speaker label")
-        if message.startswith(("{", "[")) or re.search(
-            r'"(?:situation|turn_plan|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
-        ):
-            raise ValueError("actor leaked private structure")
-        bubbles = [line.strip() for line in message.splitlines() if line.strip()]
-        expected_bubbles = turn_plan["bubble_count"]
-        if len(bubbles) != expected_bubbles:
-            raise ValueError(
-                f"actor bubble count mismatch: expected {expected_bubbles}, got {len(bubbles)}"
-            )
-        question_allowed = any(unit["question_allowed"] for unit in turn_plan["units"])
-        if not question_allowed and any("?" in bubble for bubble in bubbles):
-            raise ValueError("actor emitted a question when no turn unit allowed one")
+        try:
+            message = result.content.strip()
+            if not message:
+                raise ValueError("actor returned empty text")
+            if result.finish_reason.casefold() in {"length", "max_tokens"}:
+                raise ValueError("actor output was truncated")
+            if re.match(rf"^{re.escape(speaker)}\s*:", message, re.IGNORECASE):
+                raise ValueError("actor leaked the speaker label")
+            if message.startswith(("{", "[")) or re.search(
+                r'"(?:situation|turn_plan|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
+            ):
+                raise ValueError("actor leaked private structure")
+            bubbles = [line.strip() for line in message.splitlines() if line.strip()]
+            expected_bubbles = turn_plan["bubble_count"]
+            if len(bubbles) != expected_bubbles:
+                raise ValueError(
+                    f"actor bubble count mismatch: expected {expected_bubbles}, got {len(bubbles)}"
+                )
+            question_allowed = any(unit["question_allowed"] for unit in turn_plan["units"])
+            if not question_allowed and any("?" in bubble for bubble in bubbles):
+                raise ValueError("actor emitted a question when no turn unit allowed one")
+        except Exception as exc:
+            repair_feedback["text"] = str(exc)
+            raise
         return {
             "data": "\n".join(bubbles),
             "audit": {

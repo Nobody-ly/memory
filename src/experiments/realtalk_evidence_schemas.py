@@ -307,6 +307,15 @@ def normalize_decision(value: Any) -> dict[str, Any]:
             "question_allowed": unit["question_allowed"],
             "self_disclosure_allowed": unit["self_disclosure_allowed"],
         })
+    if plan["bubble_count"] != len(units):
+        raise ValueError("turn_plan.bubble_count must equal normalized unit count")
+    if (
+        situation["conversational_obligation"] == "ask"
+        and not any(unit["question_allowed"] for unit in units)
+    ):
+        raise ValueError("ask obligation requires a question_allowed turn unit")
+    if any(unit["act"] == "follow_up" and not unit["question_allowed"] for unit in units):
+        raise ValueError("follow_up turn unit requires question_allowed=true")
     return {
         "situation": {
             "partner_act": _enum(situation["partner_act"], situation_schema["properties"]["partner_act"]["enum"], "situation.partner_act"),
