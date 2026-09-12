@@ -265,6 +265,10 @@ class EvidenceDataTests(unittest.TestCase):
         self.assertLessEqual(set(formal["12"]), set(formal["24"]))
         self.assertLessEqual(set(formal["24"]), set(formal["60"]))
         self.assertLessEqual(set(formal["60"]), set(formal["120"]))
+        self.assertEqual(
+            {result_id.split(":")[2] for result_id in formal["12"]},
+            {"session_1", "session_2", "session_3"},
+        )
 
     def test_contiguous_window_matches_the_frozen_v9_hard_segment(self):
         formal = build_gate_manifests(self.formal, "cb")

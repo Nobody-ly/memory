@@ -604,25 +604,37 @@ def build_gate_manifests(prepared: list[dict[str, Any]], mode: str) -> dict[str,
                     if point["target_session"] == session_id
                 ])
             by_item_session.append(sessions)
+        def spread(sessions: list[list[dict[str, Any]]], per_session: int) -> list[dict[str, Any]]:
+            return [
+                point
+                for session in sessions
+                for point in session[:per_session]
+            ]
+
+        def first_four(sessions: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+            return (
+                sessions[0][:2] + sessions[1][:1] + sessions[2][:1]
+            )
+
         gate12 = [
             point["result_id"]
             for sessions in by_item_session[:3]
-            for point in [p for session in sessions for p in session][:4]
+            for point in first_four(sessions)
         ]
         gate24 = [
             point["result_id"]
             for sessions in by_item_session[:6]
-            for point in [p for session in sessions for p in session][:4]
+            for point in first_four(sessions)
         ]
         gate60 = [
             point["result_id"]
             for sessions in by_item_session
-            for point in [p for session in sessions for p in session][:6]
+            for point in spread(sessions, 2)
         ]
         gate120 = [
             point["result_id"]
             for sessions in by_item_session
-            for point in [p for session in sessions for p in session][:12]
+            for point in spread(sessions, 4)
         ]
         all_ids = [point["result_id"] for item in prepared for point in item["points"]]
         manifests = {"12": gate12, "24": gate24, "60": gate60, "120": gate120, "519": all_ids}
