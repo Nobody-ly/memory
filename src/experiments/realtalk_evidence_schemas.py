@@ -118,7 +118,7 @@ USER_DOMAIN_SCHEMA = {
 
 
 DECISION_SCHEMA = {
-    "name": "realtalk_evidence_conditioned_decision_v1_5",
+    "name": "realtalk_evidence_conditioned_decision_v1_6",
     "strict": True,
     "schema": {
         "type": "object",
@@ -135,12 +135,13 @@ DECISION_SCHEMA = {
                         "type": "string",
                         "enum": ["answer", "acknowledge", "react", "share", "ask", "close", "none"],
                     },
+                    "explicit_request": {"type": "string", "maxLength": 240},
                     "uncertainty": {
                         "type": "string",
                         "enum": ["low", "medium", "high"],
                     },
                 },
-                "required": ["partner_act", "current_topic", "conversational_obligation", "uncertainty"],
+                "required": ["partner_act", "current_topic", "conversational_obligation", "explicit_request", "uncertainty"],
                 "additionalProperties": False,
             },
             "alignment": {
@@ -163,36 +164,23 @@ DECISION_SCHEMA = {
                 "required": ["orientation", "lambda_trace", "basis", "affected_dimensions"],
                 "additionalProperties": False,
             },
-            "turn_plan": {
+            "response_guidance": {
                 "type": "object",
                 "properties": {
-                    "bubble_count": {"type": "integer", "minimum": 1, "maximum": 3},
-                    "units": {
-                        "type": "array", "minItems": 1, "maxItems": 3,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "act": {"type": "string", "enum": [
-                                    "answer", "acknowledge", "react", "self_disclose", "explain",
-                                    "follow_up", "topic_shift", "close"
-                                ]},
-                                "content_slot": {"type": "string", "maxLength": 240},
-                                "question_allowed": {"type": "boolean"},
-                                "self_disclosure_allowed": {"type": "boolean"},
-                            },
-                            "required": ["act", "content_slot", "question_allowed", "self_disclosure_allowed"],
-                            "additionalProperties": False,
-                        },
-                    },
-                    "relationship_tone": {"type": "string", "enum": ["casual", "warm", "close", "neutral", "playful", "serious"]},
-                    "length_band": {"type": "string", "enum": ["short", "typical", "long"]},
+                    "must_address": _strings_schema(min_items=1, max_items=4, item_max_length=240),
+                    "optional_elements": _strings_schema(max_items=3, item_max_length=240),
+                    "avoid": _strings_schema(max_items=4, item_max_length=240),
+                    "question_permission": {"type": "string", "enum": ["none", "allowed", "required"]},
+                    "self_disclosure_permission": {"type": "string", "enum": ["none", "allowed_if_natural", "preferred"]},
+                    "reflection_permission": {"type": "string", "enum": ["none", "allowed_if_supported", "preferred"]},
+                    "length_preference": {"type": "string", "enum": ["short", "typical", "long"]},
                 },
-                "required": ["bubble_count", "units", "relationship_tone", "length_band"],
+                "required": ["must_address", "optional_elements", "avoid", "question_permission", "self_disclosure_permission", "reflection_permission", "length_preference"],
                 "additionalProperties": False,
             },
             "evidence_ids": _strings_schema(max_items=8),
         },
-        "required": ["situation", "alignment", "turn_plan", "evidence_ids"],
+        "required": ["situation", "alignment", "response_guidance", "evidence_ids"],
         "additionalProperties": False,
     },
 }
@@ -285,42 +273,16 @@ def normalize_decision(value: Any) -> dict[str, Any]:
     situation = _exact(root["situation"], situation_schema, "situation")
     alignment_schema = schema["properties"]["alignment"]
     alignment = _exact(root["alignment"], alignment_schema, "alignment")
-    plan_schema = schema["properties"]["turn_plan"]
-    plan = _exact(root["turn_plan"], plan_schema, "turn_plan")
-    if not isinstance(plan["units"], list):
-        raise ValueError("turn_plan.units must be an array")
-    if len(plan["units"]) < 1 or len(plan["units"]) > 3:
-        raise ValueError("turn_plan.units must contain 1-3 units")
-    if plan["bubble_count"] != len(plan["units"]):
-        raise ValueError("turn_plan.bubble_count must equal len(turn_plan.units)")
-    units = []
-    unit_schema = plan_schema["properties"]["units"]["items"]
-    for index, raw in enumerate(plan["units"]):
-        unit = _exact(raw, unit_schema, f"turn_plan.units[{index}]")
-        if not isinstance(unit["question_allowed"], bool):
-            raise ValueError(f"turn_plan.units[{index}].question_allowed must be boolean")
-        if not isinstance(unit["self_disclosure_allowed"], bool):
-            raise ValueError(f"turn_plan.units[{index}].self_disclosure_allowed must be boolean")
-        units.append({
-            "act": _enum(unit["act"], unit_schema["properties"]["act"]["enum"], f"turn_plan.units[{index}].act"),
-            "content_slot": _text_for_schema(unit["content_slot"], unit_schema["properties"]["content_slot"], f"turn_plan.units[{index}].content_slot"),
-            "question_allowed": unit["question_allowed"],
-            "self_disclosure_allowed": unit["self_disclosure_allowed"],
-        })
-    if plan["bubble_count"] != len(units):
-        raise ValueError("turn_plan.bubble_count must equal normalized unit count")
-    if (
-        situation["conversational_obligation"] == "ask"
-        and not any(unit["question_allowed"] for unit in units)
-    ):
-        raise ValueError("ask obligation requires a question_allowed turn unit")
-    if any(unit["act"] == "follow_up" and not unit["question_allowed"] for unit in units):
-        raise ValueError("follow_up turn unit requires question_allowed=true")
+    guidance_schema = schema["properties"]["response_guidance"]
+    guidance = _exact(root["response_guidance"], guidance_schema, "response_guidance")
+    if situation["conversational_obligation"] in {"answer", "ask"} and not guidance["must_address"]:
+        raise ValueError("answer or ask obligation requires must_address")
     return {
         "situation": {
             "partner_act": _enum(situation["partner_act"], situation_schema["properties"]["partner_act"]["enum"], "situation.partner_act"),
             "current_topic": _text_for_schema(situation["current_topic"], situation_schema["properties"]["current_topic"], "situation.current_topic"),
             "conversational_obligation": _enum(situation["conversational_obligation"], situation_schema["properties"]["conversational_obligation"]["enum"], "situation.conversational_obligation"),
+            "explicit_request": _bounded_text(situation["explicit_request"], situation_schema["properties"]["explicit_request"], "situation.explicit_request"),
             "uncertainty": _enum(situation["uncertainty"], situation_schema["properties"]["uncertainty"]["enum"], "situation.uncertainty"),
         },
         "alignment": {
@@ -338,11 +300,14 @@ def normalize_decision(value: Any) -> dict[str, Any]:
                 ))
             ],
         },
-        "turn_plan": {
-            "bubble_count": _integer(plan["bubble_count"], "turn_plan.bubble_count", 1, 3),
-            "units": units,
-            "relationship_tone": _enum(plan["relationship_tone"], plan_schema["properties"]["relationship_tone"]["enum"], "turn_plan.relationship_tone"),
-            "length_band": _enum(plan["length_band"], plan_schema["properties"]["length_band"]["enum"], "turn_plan.length_band"),
+        "response_guidance": {
+            "must_address": _strings_for_schema(guidance["must_address"], guidance_schema["properties"]["must_address"], "response_guidance.must_address"),
+            "optional_elements": _strings_for_schema(guidance["optional_elements"], guidance_schema["properties"]["optional_elements"], "response_guidance.optional_elements"),
+            "avoid": _strings_for_schema(guidance["avoid"], guidance_schema["properties"]["avoid"], "response_guidance.avoid"),
+            "question_permission": _enum(guidance["question_permission"], guidance_schema["properties"]["question_permission"]["enum"], "response_guidance.question_permission"),
+            "self_disclosure_permission": _enum(guidance["self_disclosure_permission"], guidance_schema["properties"]["self_disclosure_permission"]["enum"], "response_guidance.self_disclosure_permission"),
+            "reflection_permission": _enum(guidance["reflection_permission"], guidance_schema["properties"]["reflection_permission"]["enum"], "response_guidance.reflection_permission"),
+            "length_preference": _enum(guidance["length_preference"], guidance_schema["properties"]["length_preference"]["enum"], "response_guidance.length_preference"),
         },
         "evidence_ids": _strings_for_schema(root["evidence_ids"], schema["properties"]["evidence_ids"], "evidence_ids"),
     }
@@ -429,6 +394,16 @@ def _text_for_schema(value: Any, schema: dict[str, Any], path: str) -> str:
     if maximum is not None and len(text) > maximum:
         raise ValueError(f"{path} exceeds maxLength={maximum}")
     return text
+
+
+def _bounded_text(value: Any, schema: dict[str, Any], path: str) -> str:
+    """Validate an optional short text field while allowing an explicit empty value."""
+    if not isinstance(value, str):
+        raise ValueError(f"{path} must be a string")
+    maximum = schema.get("maxLength")
+    if maximum is not None and len(value) > maximum:
+        raise ValueError(f"{path} exceeds maxLength={maximum}")
+    return value.strip()
 
 
 def _strings_for_schema(

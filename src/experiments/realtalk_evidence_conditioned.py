@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_5_1"
+PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_6"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -105,26 +105,20 @@ CUMULATIVE PARTNER EVIDENCE ID WHITELIST:
 Return the updated complete five-layer partner model. Every evidence ID must be copied from the
 whitelist. Preserve well-supported prior facts when they remain consistent."""
 
-DECISION_SYSTEM_PROMPT = """You are the private behavior controller for persona simulation.
-This is a next-utterance prediction task, not a relationship-improvement or conversation-maximization
-task. Infer the most probable message structure this observed person would actually produce at this exact point.
-Understand the current exchange as the target person. Use the reference conversation as evidence of the
-target's identity and voice, and the current conversation as the reality of this particular relationship.
-Distinguish the target person's current context, the partner's current state, and their shared interaction.
-Treat an explicit new-session boundary as a real temporal break: earlier threads remain background, but are
-not automatically the active topic. The boundary does not prescribe a greeting or any other fixed action.
-Weigh the target's own tendencies against the current partner only when the current turn makes adaptation
-relevant. lambda_trace records this soft balance: lower means the target's own tendency dominates; higher
-means the message structure adapts more to the current exchange. It is not an empathy score, profile
-confidence, reward, or quota. It should vary with the situation and affect at least one planned dimension.
+DECISION_SYSTEM_PROMPT = """You are the private situation and alignment controller for persona simulation.
+This is a next-utterance prediction task: infer what the target person would most naturally say now,
+not what would improve the relationship, maximize empathy, or satisfy an evaluation metric. Use the
+private Self Domain as the default identity and voice. Use the five-layer User Domain only when a relevant
+partner fact genuinely changes the current response. Read the complete real history before the target
+turn and distinguish the partner's move, the target's conversational obligation, and uncertain details.
 
-Direct questions normally require an answer before any optional continuation. Do not add a follow-up question
-by default. If a unit permits a question, set question_allowed=true; if it is false, the Actor must not ask
-one even when the basis text discusses a possible reciprocal question. Choose one to three message units only when the target's observed bubble habits and this exact
-conversational obligation support them. Each unit is a content slot, not a draft. The response actor will emit
-exactly the planned number of newline-separated bubbles. Treat old activities, plans and feelings as
-background rather than the target's current state unless the current session confirms them. Return only the
-strict JSON schema and do not reconstruct a reference answer."""
+A direct question normally needs a direct answer. Do not add a follow-up question by default. Do not force
+self-disclosure, reflection, emotion labeling, praise, advice, warmth, or a multi-part response. The target
+may answer, react, share, ask, close, or say nothing depending on the actual exchange and observed person.
+The lambda_trace is an auditable soft tradeoff between the target's default identity and adaptation to the
+current exchange. It is not a score, quota, reward, or formula that mechanically changes the text. Its
+orientation and affected_dimensions must be reflected in response_guidance. Return only the strict JSON
+schema; never draft the final message or reconstruct the reference answer."""
 
 DECISION_FORMAL_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -150,8 +144,8 @@ VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
 {behavior_statistics}
 
-Infer the situation, alignment and turn plan for {speaker}. Evidence IDs may be empty; otherwise copy only
-visible IDs. Answer a direct partner question before optional self-disclosure or follow-up."""
+Infer the situation, alignment and soft response guidance for {speaker}. Evidence IDs may be empty;
+otherwise copy only visible IDs. Answer a direct partner question before any optional continuation."""
 
 DECISION_DEV_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -176,16 +170,16 @@ VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
 {behavior_statistics}
 
-Infer the situation, alignment and turn plan for {speaker}. Evidence IDs may be empty; otherwise copy only
-visible IDs. Answer a direct partner question before optional self-disclosure or follow-up."""
+Infer the situation, alignment and soft response guidance for {speaker}. Evidence IDs may be empty;
+otherwise copy only visible IDs. Answer a direct partner question before any optional continuation."""
 
 ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
-Act as the person represented by the private Self Domain and follow the private turn plan naturally.
-The turn plan is a structure, not a script: write the person's own words in their observed voice. Answer
-the partner's direct question when the plan says answer. Do not invent a second topic, add a question that
-is not permitted by the plan, or explain the private plan. Emit exactly the planned number of non-empty
-message bubbles, one bubble per physical line. Predict the person's most likely actual message. Output only
-the message, not the speaker name."""
+Act as the person represented by the private Self Domain and use the private response guidance softly.
+Write the most likely natural message in the person's observed voice. Answer a direct question when the
+situation requires it. Do not force disclosure, reflection, emotion, praise, advice, or warmth. Follow
+question guidance, but do not manufacture a question when none is warranted. One or more natural message
+bubbles are allowed; there is no fixed bubble count or fixed length. Output only the message, not the
+speaker name, JSON, internal reasoning, or private guidance."""
 
 ACTOR_FORMAL_TEMPLATE = """REFERENCE CONVERSATION WITH {reference_partner} ({reference_scope}):
 {reference_history}
@@ -199,12 +193,10 @@ CURRENT CONVERSATION TO CONTINUE (REAL HISTORY BEFORE YOUR NEXT TURN):
 CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 {conversation_position}
 
-PRIVATE TURN PLAN:
-{turn_plan}
+PRIVATE RESPONSE GUIDANCE:
+{response_guidance}
 
-Emit exactly the planned number of non-empty newline-separated message bubbles. The question_allowed flags
-are hard permissions: never emit a question mark when every flag is false. Do not include JSON, speaker
-labels, or internal reasoning.
+Use this as soft guidance rather than a script. Do not include JSON, speaker labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -220,12 +212,10 @@ CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 {self_domain}
 
-PRIVATE TURN PLAN:
-{turn_plan}
+PRIVATE RESPONSE GUIDANCE:
+{response_guidance}
 
-Emit exactly the planned number of non-empty newline-separated message bubbles. The question_allowed flags
-are hard permissions: never emit a question mark when every flag is false. Do not include JSON, speaker
-labels, or internal reasoning.
+Use this as soft guidance rather than a script. Do not include JSON, speaker labels, or internal reasoning.
 
 Continue naturally as {speaker}."""
 
@@ -687,7 +677,14 @@ def actor_prompt(
     generation_input: dict[str, Any], self_domain: dict[str, Any],
     decision: dict[str, Any],
 ) -> str:
-    turn_plan = decision["turn_plan"]
+    response_guidance = {
+        "situation": decision["situation"],
+        "alignment": {
+            "orientation": decision["alignment"]["orientation"],
+            "affected_dimensions": decision["alignment"]["affected_dimensions"],
+        },
+        "response_guidance": decision["response_guidance"],
+    }
     if generation_input["mode"] == "cb":
         return ACTOR_FORMAL_TEMPLATE.format(
             speaker=generation_input["speaker"],
@@ -697,20 +694,20 @@ def actor_prompt(
             self_domain=_json(self_domain),
             current_history=format_evidence_turns(generation_input["current_turns"]),
             conversation_position=_json(generation_input["conversation_position"]),
-            turn_plan=_json(turn_plan),
+            response_guidance=_json(response_guidance),
         )
     return ACTOR_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"],
         reference_scope=generation_input["reference_scope"],
         current_history=format_evidence_turns(generation_input["current_turns"]),
         conversation_position=_json(generation_input["conversation_position"]),
-        self_domain=_json(self_domain), turn_plan=_json(turn_plan),
+        self_domain=_json(self_domain), response_guidance=_json(response_guidance),
     )
 
 
 def _actor_call(
     *, checkpoint: OperationCheckpoint, backend: ChatBackend, operation_key: str,
-    speaker: str, user_prompt: str, turn_plan: dict[str, Any], raw_audit: Path,
+    speaker: str, user_prompt: str, raw_audit: Path,
 ) -> dict[str, Any]:
     system_prompt = ACTOR_SYSTEM_TEMPLATE.format(speaker=speaker)
     repair_feedback = {"text": ""}
@@ -721,7 +718,7 @@ def _actor_call(
             prompt += (
                 "\n\nCONTRACT REPAIR FROM THE PREVIOUS ATTEMPT:\n"
                 + repair_feedback["text"]
-                + "\nRegenerate the same turn plan without changing its permissions."
+                + "\nRegenerate the message while preserving the same soft response guidance."
             )
         return backend.chat(
             system_prompt, prompt, temperature=0.6, top_p=0.9,
@@ -749,23 +746,14 @@ def _actor_call(
             if re.match(rf"^{re.escape(speaker)}\s*:", message, re.IGNORECASE):
                 raise ValueError("actor leaked the speaker label")
             if message.startswith(("{", "[")) or re.search(
-                r'"(?:situation|turn_plan|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
+                r'"(?:situation|turn_plan|response_guidance|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
             ):
                 raise ValueError("actor leaked private structure")
-            bubbles = [line.strip() for line in message.splitlines() if line.strip()]
-            expected_bubbles = turn_plan["bubble_count"]
-            if len(bubbles) != expected_bubbles:
-                raise ValueError(
-                    f"actor bubble count mismatch: expected {expected_bubbles}, got {len(bubbles)}"
-                )
-            question_allowed = any(unit["question_allowed"] for unit in turn_plan["units"])
-            if not question_allowed and any("?" in bubble for bubble in bubbles):
-                raise ValueError("actor emitted a question when no turn unit allowed one")
         except Exception as exc:
             repair_feedback["text"] = str(exc)
             raise
         return {
-            "data": "\n".join(bubbles),
+            "data": message,
             "audit": {
                 "model": result.model, "logical_attempts": 1,
                 "thinking_enabled": False, "finish_reason": result.finish_reason,
@@ -972,7 +960,6 @@ def _run_impl(
             user_prompt=actor_prompt(
                 generation_input, self_domains[item["speaker"]], decision
             ),
-            turn_plan=decision["turn_plan"],
             raw_audit=raw_audit,
         )
         checkpoint.store_result(result_id, {

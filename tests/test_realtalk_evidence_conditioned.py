@@ -84,6 +84,7 @@ def _decision_value(evidence_id: str | None = None) -> dict:
             "partner_act": "statement",
             "current_topic": "the current everyday topic",
             "conversational_obligation": "react",
+            "explicit_request": "",
             "uncertainty": "low",
         },
         "alignment": {
@@ -92,16 +93,14 @@ def _decision_value(evidence_id: str | None = None) -> dict:
             "basis": "Keep the person's voice while staying responsive.",
             "affected_dimensions": ["tone"],
         },
-        "turn_plan": {
-            "bubble_count": 1,
-            "units": [{
-                "act": "react",
-                "content_slot": "Continue the active topic naturally in character.",
-                "question_allowed": False,
-                "self_disclosure_allowed": False,
-            }],
-            "relationship_tone": "casual",
-            "length_band": "short",
+        "response_guidance": {
+            "must_address": ["Continue the active topic naturally in character."],
+            "optional_elements": [],
+            "avoid": ["Do not turn this into a generic advice response."],
+            "question_permission": "none",
+            "self_disclosure_permission": "allowed_if_natural",
+            "reflection_permission": "allowed_if_supported",
+            "length_preference": "short",
         },
         "evidence_ids": [evidence_id] if evidence_id else [],
     }
@@ -201,13 +200,13 @@ class EvidenceSchemaTests(unittest.TestCase):
                 {"Chat.json::session_1:turn_0"},
             )
 
-    def test_v15_turn_plan_is_structural_and_enum_checked(self):
+    def test_v16_response_guidance_is_structural_and_enum_checked(self):
         value = normalize_decision(_decision_value())
-        self.assertEqual(value["turn_plan"]["bubble_count"], 1)
-        invalid_count = _decision_value()
-        invalid_count["turn_plan"]["bubble_count"] = 2
-        with self.assertRaisesRegex(ValueError, "bubble_count must equal"):
-            normalize_decision(invalid_count)
+        self.assertEqual(value["response_guidance"]["length_preference"], "short")
+        legacy = _decision_value()
+        legacy["turn_plan"] = {}
+        with self.assertRaisesRegex(ValueError, "extra=.*turn_plan"):
+            normalize_decision(legacy)
         invalid_dimension = _decision_value()
         invalid_dimension["alignment"]["affected_dimensions"] = ["invented"]
         with self.assertRaisesRegex(ValueError, "must be one of"):
@@ -275,7 +274,6 @@ class EvidenceDataTests(unittest.TestCase):
         self.assertEqual(decision_text.count(first_reference_content), 1)
         self.assertEqual(actor_text.count(first_reference_content), 1)
         self.assertNotIn('"lambda_trace"', actor_text)
-        self.assertNotIn('"alignment"', actor_text)
         self.assertNotIn('"update_summary"', actor_text)
 
     def test_new_session_position_is_visible_without_target_text(self):
@@ -412,7 +410,7 @@ class EvidencePipelineTests(unittest.TestCase):
         system = ACTOR_SYSTEM_TEMPLATE.format(speaker="Emi")
         self.assertIn("You are Emi", system)
         self.assertIn("next-utterance prediction task", DECISION_SYSTEM_PROMPT)
-        self.assertIn("most likely actual message", system)
+        self.assertIn("most likely natural message", system)
         for forbidden in ("Reflectiveness", "Grounding", "Intimacy", "Empathy"):
             self.assertNotIn(forbidden, system)
             self.assertNotIn(forbidden, DECISION_SYSTEM_PROMPT)
