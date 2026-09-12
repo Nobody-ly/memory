@@ -969,7 +969,27 @@ def _run_impl(
             }
         },
     })
-    checkpoint = OperationCheckpoint(output_dir / "checkpoint.json", signature)
+    checkpoint_path = output_dir / "checkpoint.json"
+    allow_gate_expansion = False
+    if config.resume and config.mode == "cb" and checkpoint_path.exists():
+        existing_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        existing_result_ids = set(existing_checkpoint.get("results", {}))
+        selected_result_ids = set(selected_ids)
+        # A formal gate may grow only when every cached sample is part of the
+        # new nested gate. This preserves prior API results and rejects any
+        # accidental protocol/model/data change.
+        allow_gate_expansion = bool(
+            existing_result_ids
+            and existing_result_ids < selected_result_ids
+            and existing_result_ids.issubset(selected_result_ids)
+        )
+    checkpoint = OperationCheckpoint(
+        checkpoint_path,
+        signature,
+        allow_signature_update=allow_gate_expansion,
+    )
+    if allow_gate_expansion:
+        checkpoint.save()
     if config.preflight_only:
         _write_json(output_dir / "manifest.json", {**manifest_base, "status": "preflight_complete"})
         return {"status": "preflight_complete", "output_dir": str(output_dir)}

@@ -14,9 +14,16 @@ class CheckpointSignatureError(RuntimeError):
 
 
 class OperationCheckpoint:
-    def __init__(self, path: Path, run_signature: str):
+    def __init__(
+        self,
+        path: Path,
+        run_signature: str,
+        *,
+        allow_signature_update: bool = False,
+    ):
         self.path = path
         self.run_signature = run_signature
+        self.allow_signature_update = allow_signature_update
         self.data = self._load()
 
     def _load(self) -> Dict[str, Any]:
@@ -31,6 +38,11 @@ class OperationCheckpoint:
         with self.path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
         if data.get("run_signature") != self.run_signature:
+            if self.allow_signature_update:
+                data.setdefault("run_signature_history", []).append(data.get("run_signature"))
+                data["run_signature"] = self.run_signature
+                data["signature_updated_at_utc"] = _now()
+                return data
             raise CheckpointSignatureError(
                 "checkpoint does not match this run; use another output directory or --fresh"
             )
