@@ -9,6 +9,7 @@ SELF_SECTION_LIMITS = {
     "self_claims": 12,
     "voice": 6,
     "social_dispositions": 6,
+    "behavioral_conditions": 8,
     "uncertainties": 8,
 }
 
@@ -43,7 +44,7 @@ def _evidenced_item(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 SELF_DOMAIN_SCHEMA = {
-    "name": "realtalk_evidence_conditioned_self_domain_v1_3",
+    "name": "realtalk_behavior_conditioned_self_domain_v2",
     "strict": True,
     "schema": {
         "type": "object",
@@ -71,6 +72,21 @@ SELF_DOMAIN_SCHEMA = {
                     "observed_context": {"type": "string", "maxLength": 160},
                 }),
             },
+            "behavioral_conditions": {
+                "type": "array",
+                "maxItems": SELF_SECTION_LIMITS["behavioral_conditions"],
+                "items": _evidenced_item({
+                    "trigger": {"type": "string", "enum": [
+                        "direct_question", "partner_disclosure", "partner_affect",
+                        "asks_about_target", "opinion_or_advice",
+                        "topic_continuation", "conversation_closure",
+                    ]},
+                    "likely_response": {"type": "string", "maxLength": 240},
+                    "question_tendency": {"type": "string", "maxLength": 120},
+                    "disclosure_tendency": {"type": "string", "maxLength": 120},
+                    "reflection_tendency": {"type": "string", "maxLength": 120},
+                }),
+            },
             "uncertainties": {
                 **_strings_schema(
                     max_items=SELF_SECTION_LIMITS["uncertainties"],
@@ -79,7 +95,7 @@ SELF_DOMAIN_SCHEMA = {
             },
         },
         "required": [
-            "self_claims", "voice", "social_dispositions", "uncertainties"
+            "self_claims", "voice", "social_dispositions", "behavioral_conditions", "uncertainties"
         ],
         "additionalProperties": False,
     },
@@ -118,7 +134,7 @@ USER_DOMAIN_SCHEMA = {
 
 
 DECISION_SCHEMA = {
-    "name": "realtalk_evidence_conditioned_decision_v1_6",
+    "name": "realtalk_behavior_conditioned_decision_v2",
     "strict": True,
     "schema": {
         "type": "object",
@@ -156,7 +172,7 @@ DECISION_SCHEMA = {
                     "affected_dimensions": {
                         "type": "array",
                         "items": {"type": "string", "enum": [
-                            "questioning", "length", "tone", "self_disclosure", "topic", "bubble_count"
+                            "content_focus", "questioning", "length", "tone", "self_disclosure", "reflection", "topic"
                         ]},
                         "minItems": 1, "maxItems": 4,
                     },
@@ -164,23 +180,45 @@ DECISION_SCHEMA = {
                 "required": ["orientation", "lambda_trace", "basis", "affected_dimensions"],
                 "additionalProperties": False,
             },
-            "response_guidance": {
+            "user_state": {
                 "type": "object",
                 "properties": {
-                    "must_address": _strings_schema(min_items=1, max_items=4, item_max_length=240),
-                    "optional_elements": _strings_schema(max_items=3, item_max_length=240),
-                    "avoid": _strings_schema(max_items=4, item_max_length=240),
-                    "question_permission": {"type": "string", "enum": ["none", "allowed", "required"]},
-                    "self_disclosure_permission": {"type": "string", "enum": ["none", "allowed_if_natural", "preferred"]},
-                    "reflection_permission": {"type": "string", "enum": ["none", "allowed_if_supported", "preferred"]},
-                    "length_preference": {"type": "string", "enum": ["short", "typical", "long"]},
+                    "interaction_need": {"type": "string", "enum": [
+                        "information_exchange", "emotional_acknowledgment", "reciprocal_sharing",
+                        "clarification", "topic_continuation", "closing", "unclear",
+                    ]},
+                    "affect": {"type": "string", "enum": ["positive", "neutral", "negative", "mixed", "unclear"]},
+                    "affect_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "topic_continuity": {"type": "string", "enum": ["continue_current_topic", "new_topic", "closing", "unclear"]},
+                    "response_pressure": {"type": "string", "enum": ["low", "moderate", "high", "unclear"]},
                 },
-                "required": ["must_address", "optional_elements", "avoid", "question_permission", "self_disclosure_permission", "reflection_permission", "length_preference"],
+                "required": ["interaction_need", "affect", "affect_confidence", "topic_continuity", "response_pressure"],
+                "additionalProperties": False,
+            },
+            "behavior_policy": {
+                "type": "object",
+                "properties": {
+                    "primary_goal": {"type": "string", "enum": [
+                        "answer_current_question", "acknowledge_partner", "react_to_partner",
+                        "share_personal_content", "ask_for_clarification", "continue_topic",
+                        "close_conversation", "brief_response",
+                    ]},
+                    "required_content": _strings_schema(min_items=1, max_items=3, item_max_length=240),
+                    "optional_content": _strings_schema(max_items=3, item_max_length=240),
+                    "avoid": _strings_schema(max_items=4, item_max_length=240),
+                    "question_policy": {"type": "string", "enum": ["none", "allowed", "required"]},
+                    "self_disclosure_policy": {"type": "string", "enum": ["none", "allowed_if_natural", "preferred"]},
+                    "reflection_policy": {"type": "string", "enum": ["none", "allowed_if_supported", "preferred"]},
+                    "topic_policy": {"type": "string", "enum": ["continue_current_topic", "new_topic_if_natural", "close", "no_preference"]},
+                    "tone": {"type": "string", "enum": ["casual", "warm", "neutral", "playful", "serious", "direct"]},
+                    "length": {"type": "string", "enum": ["short", "typical", "long"]},
+                },
+                "required": ["primary_goal", "required_content", "optional_content", "avoid", "question_policy", "self_disclosure_policy", "reflection_policy", "topic_policy", "tone", "length"],
                 "additionalProperties": False,
             },
             "evidence_ids": _strings_schema(max_items=8),
         },
-        "required": ["situation", "alignment", "response_guidance", "evidence_ids"],
+        "required": ["situation", "user_state", "alignment", "behavior_policy", "evidence_ids"],
         "additionalProperties": False,
     },
 }
@@ -204,7 +242,7 @@ def normalize_self_domain(value: Any) -> dict[str, Any]:
             "uncertainties",
         )
     }
-    for section in ("self_claims", "voice", "social_dispositions"):
+    for section in ("self_claims", "voice", "social_dispositions", "behavioral_conditions"):
         if not isinstance(root[section], list):
             raise ValueError(f"{section} must be an array")
         if len(root[section]) > SELF_SECTION_LIMITS[section]:
@@ -223,6 +261,10 @@ def normalize_self_domain(value: Any) -> dict[str, Any]:
                     )
                 elif key == "confidence":
                     normalized[key] = _confidence(item[key], path)
+                elif section == "behavioral_conditions" and key == "trigger":
+                    normalized[key] = _enum(
+                        item[key], schema["properties"][key]["enum"], path
+                    )
                 else:
                     normalized[key] = _text_for_schema(
                         item[key], property_schema, path
@@ -273,10 +315,10 @@ def normalize_decision(value: Any) -> dict[str, Any]:
     situation = _exact(root["situation"], situation_schema, "situation")
     alignment_schema = schema["properties"]["alignment"]
     alignment = _exact(root["alignment"], alignment_schema, "alignment")
-    guidance_schema = schema["properties"]["response_guidance"]
-    guidance = _exact(root["response_guidance"], guidance_schema, "response_guidance")
-    if situation["conversational_obligation"] in {"answer", "ask"} and not guidance["must_address"]:
-        raise ValueError("answer or ask obligation requires must_address")
+    state_schema = schema["properties"]["user_state"]
+    state = _exact(root["user_state"], state_schema, "user_state")
+    policy_schema = schema["properties"]["behavior_policy"]
+    policy = _exact(root["behavior_policy"], policy_schema, "behavior_policy")
     return {
         "situation": {
             "partner_act": _enum(situation["partner_act"], situation_schema["properties"]["partner_act"]["enum"], "situation.partner_act"),
@@ -300,14 +342,24 @@ def normalize_decision(value: Any) -> dict[str, Any]:
                 ))
             ],
         },
-        "response_guidance": {
-            "must_address": _strings_for_schema(guidance["must_address"], guidance_schema["properties"]["must_address"], "response_guidance.must_address"),
-            "optional_elements": _strings_for_schema(guidance["optional_elements"], guidance_schema["properties"]["optional_elements"], "response_guidance.optional_elements"),
-            "avoid": _strings_for_schema(guidance["avoid"], guidance_schema["properties"]["avoid"], "response_guidance.avoid"),
-            "question_permission": _enum(guidance["question_permission"], guidance_schema["properties"]["question_permission"]["enum"], "response_guidance.question_permission"),
-            "self_disclosure_permission": _enum(guidance["self_disclosure_permission"], guidance_schema["properties"]["self_disclosure_permission"]["enum"], "response_guidance.self_disclosure_permission"),
-            "reflection_permission": _enum(guidance["reflection_permission"], guidance_schema["properties"]["reflection_permission"]["enum"], "response_guidance.reflection_permission"),
-            "length_preference": _enum(guidance["length_preference"], guidance_schema["properties"]["length_preference"]["enum"], "response_guidance.length_preference"),
+        "user_state": {
+            "interaction_need": _enum(state["interaction_need"], state_schema["properties"]["interaction_need"]["enum"], "user_state.interaction_need"),
+            "affect": _enum(state["affect"], state_schema["properties"]["affect"]["enum"], "user_state.affect"),
+            "affect_confidence": _confidence(state["affect_confidence"], "user_state.affect_confidence"),
+            "topic_continuity": _enum(state["topic_continuity"], state_schema["properties"]["topic_continuity"]["enum"], "user_state.topic_continuity"),
+            "response_pressure": _enum(state["response_pressure"], state_schema["properties"]["response_pressure"]["enum"], "user_state.response_pressure"),
+        },
+        "behavior_policy": {
+            "primary_goal": _enum(policy["primary_goal"], policy_schema["properties"]["primary_goal"]["enum"], "behavior_policy.primary_goal"),
+            "required_content": _strings_for_schema(policy["required_content"], policy_schema["properties"]["required_content"], "behavior_policy.required_content"),
+            "optional_content": _strings_for_schema(policy["optional_content"], policy_schema["properties"]["optional_content"], "behavior_policy.optional_content"),
+            "avoid": _strings_for_schema(policy["avoid"], policy_schema["properties"]["avoid"], "behavior_policy.avoid"),
+            "question_policy": _enum(policy["question_policy"], policy_schema["properties"]["question_policy"]["enum"], "behavior_policy.question_policy"),
+            "self_disclosure_policy": _enum(policy["self_disclosure_policy"], policy_schema["properties"]["self_disclosure_policy"]["enum"], "behavior_policy.self_disclosure_policy"),
+            "reflection_policy": _enum(policy["reflection_policy"], policy_schema["properties"]["reflection_policy"]["enum"], "behavior_policy.reflection_policy"),
+            "topic_policy": _enum(policy["topic_policy"], policy_schema["properties"]["topic_policy"]["enum"], "behavior_policy.topic_policy"),
+            "tone": _enum(policy["tone"], policy_schema["properties"]["tone"]["enum"], "behavior_policy.tone"),
+            "length": _enum(policy["length"], policy_schema["properties"]["length"]["enum"], "behavior_policy.length"),
         },
         "evidence_ids": _strings_for_schema(root["evidence_ids"], schema["properties"]["evidence_ids"], "evidence_ids"),
     }
@@ -316,7 +368,7 @@ def normalize_decision(value: Any) -> dict[str, Any]:
 def validate_evidence_ids(value: dict[str, Any], allowed: set[str]) -> dict[str, Any]:
     found: set[str] = set()
     for key, raw in value.items():
-        if key in {"self_claims", "voice", "social_dispositions"}:
+        if key in {"self_claims", "voice", "social_dispositions", "behavioral_conditions"}:
             for item in raw:
                 found.update(item["evidence_ids"])
         elif key in PROFILE_LAYERS:

@@ -38,7 +38,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_evidence_conditioned_v1_6"
+PROTOCOL = "realtalk_task1_ours_behavior_conditioned_v2"
 MODEL = "deepseek-v4-flash"
 OFFICIAL_REALTALK_COMMIT = "b903e06a9770bf4e5fe9018c3e132889666d3b4a"
 EXPECTED_RAW_MESSAGES = 8944
@@ -57,18 +57,21 @@ DEV_GATES = (6, 24, 68)
 FORMAL_GATES = (10, 30, 90, 519)
 
 
-SELF_SYSTEM_PROMPT = """You compile a private Self Domain for persona simulation.
-Describe the target speaker as observed in the supplied conversation, not as an ideal assistant.
-Separate the target's own claims from the partner's words. Record identity claims as sourced
-self-descriptions, not independently verified truth. Describe voice and interaction tendencies only when
-the target's messages support them. A tendency observed with this one partner is context-bound unless the
-evidence itself supports a broader claim. Leave unsupported traits out and preserve uncertainty.
-Keep this as a compact transferable model, not a transcript inventory. Consolidate related evidence and
-prioritize identity/background that remains useful beyond one moment: at most 12 self claims, 6 voice
-observations, 6 social dispositions, and 8 uncertainties. Put one-off activities in temporal scope rather
-than expanding every conversational detail into its own claim. Cite at most four representative source IDs
-per item; evidence lists are not exhaustive indexes.
-Return only the strict JSON schema. Do not draft a reply or invent example quotations."""
+SELF_SYSTEM_PROMPT = """You compile a private behavioral Self Domain for a persona simulation task.
+
+The target is a real conversational participant, not an assistant, therapist, coach, or idealized
+personality. Infer only what is supported by the target speaker's own messages.
+
+Separate stable identity and preferences, linguistic and message style, social interaction tendencies,
+and conditional response patterns. For conditional patterns, describe what the target tends to do when the
+partner asks a direct question, shares an experience, expresses emotion, asks about the target, offers an
+opinion or suggestion, continues the topic, or closes the conversation.
+
+Describe what the target actually tends to do, not what the target should do. Do not turn empathy
+principles, evaluation metrics, or assistant behavior into personality traits. Do not copy partner behavior
+into the target profile. Do not treat one isolated event as a stable trait. Keep one-off activities
+temporally scoped and preserve uncertainty. Use only target-speaker evidence IDs. Return only strict JSON.
+Do not draft a reply or invent quotations."""
 
 SELF_USER_TEMPLATE = """TARGET SPEAKER: {speaker}
 SOURCE PARTNER: {partner}
@@ -83,12 +86,18 @@ the target-speaker evidence whitelist below.
 TARGET-SPEAKER EVIDENCE ID WHITELIST:
 {allowed_evidence_ids}"""
 
-USER_SYSTEM_PROMPT = """You update a private five-layer model of the current conversation partner.
-The fixed layers are core, regulation, cognition, identity, and behavior. Store only relatively durable
-evidence that can help future interaction. Current mood and one-off events belong to online scene
-understanding, not the stable profile. Empty layers are valid. Do not fill the structure with unsupported
-psychology. Facts about the target speaker must never become partner facts. Revise or withdraw old facts
-when new evidence conflicts. Return only the strict JSON schema."""
+USER_SYSTEM_PROMPT = """You update the private five-layer long-term model of the current conversation partner.
+
+The fixed layers are core, regulation, cognition, identity, and behavior. This is a durable partner
+profile, not a summary of the current session. Store only repeated preferences or behavior, durable identity
+information, recurring coping or interaction patterns, stable communication tendencies, and repeated
+cognitive or decision patterns.
+
+Do not store temporary mood, one-off events, the latest question, or the partner's current conversational
+act as stable profile facts. The current situation is handled separately by the situation and user-state
+controller. Do not infer psychological traits from one message. Do not copy facts about the target speaker
+into the partner model. Revise or withdraw facts when new evidence conflicts. Empty layers are valid.
+Every evidence ID must come from the whitelist. Return only strict JSON."""
 
 USER_USER_TEMPLATE = """TARGET SPEAKER: {speaker}
 PARTNER BEING MODELED: {partner}
@@ -105,20 +114,29 @@ CUMULATIVE PARTNER EVIDENCE ID WHITELIST:
 Return the updated complete five-layer partner model. Every evidence ID must be copied from the
 whitelist. Preserve well-supported prior facts when they remain consistent."""
 
-DECISION_SYSTEM_PROMPT = """You are the private situation and alignment controller for persona simulation.
-This is a next-utterance prediction task: infer what the target person would most naturally say now,
-not what would improve the relationship, maximize empathy, or satisfy an evaluation metric. Use the
-private Self Domain as the default identity and voice. Use the five-layer User Domain only when a relevant
-partner fact genuinely changes the current response. Read the complete real history before the target
-turn and distinguish the partner's move, the target's conversational obligation, and uncertain details.
+DECISION_SYSTEM_PROMPT = """You are the private situation, user-state, and alignment controller for persona simulation.
 
-A direct question normally needs a direct answer. Do not add a follow-up question by default. Do not force
-self-disclosure, reflection, emotion labeling, praise, advice, warmth, or a multi-part response. The target
-may answer, react, share, ask, close, or say nothing depending on the actual exchange and observed person.
-The lambda_trace is an auditable soft tradeoff between the target's default identity and adaptation to the
-current exchange. It is not a score, quota, reward, or formula that mechanically changes the text. Its
-orientation and affected_dimensions must be reflected in response_guidance. Return only the strict JSON
-schema; never draft the final message or reconstruct the reference answer."""
+This is a next-utterance prediction task. Infer what the target person would most naturally say now,
+not what would improve the relationship, maximize empathy, or satisfy an evaluation metric.
+
+Use the Self Domain and target-speaker behavioral statistics as the default identity and behavior prior.
+Use the five-layer User Domain only when a partner fact is relevant to this exchange. Read the complete
+real history before the target turn.
+
+First identify what the partner just did, the current topic, what the target must do conversationally,
+and what is uncertain. Then infer the current User State. Do not invent hidden psychological needs. Use
+explicit affect when present; use neutral or unclear when the text does not support a stronger inference.
+
+Then produce one Behavior Policy with one primary goal. Optional self-disclosure, reflection, continuation,
+and questioning are permissions, not requirements. A direct question normally requires a direct answer.
+Do not add a follow-up question by default. Do not force self-disclosure, reflection, emotion labeling,
+praise, advice, warmth, or therapy language.
+
+lambda_trace records the balance between the target's stable behavior and adaptation to the current exchange.
+It is not a score, reward, empathy value, confidence value, or quota. Its orientation and affected
+dimensions must be reflected in the Behavior Policy.
+
+Do not draft the final message. Return only strict JSON."""
 
 DECISION_FORMAL_TEMPLATE = """TARGET SPEAKER: {speaker}
 CURRENT PARTNER: {partner}
@@ -144,7 +162,7 @@ VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
 {behavior_statistics}
 
-Infer the situation, alignment and soft response guidance for {speaker}. Evidence IDs may be empty;
+Infer the situation, User State, alignment and Behavior Policy for {speaker}. Evidence IDs may be empty;
 otherwise copy only visible IDs. Answer a direct partner question before any optional continuation."""
 
 DECISION_DEV_TEMPLATE = """TARGET SPEAKER: {speaker}
@@ -170,16 +188,23 @@ VISIBLE SOURCE ID WHITELIST FOR POLICY EVIDENCE:
 DETERMINISTIC TARGET-SPEAKER BEHAVIOR STATISTICS FROM THE REFERENCE SCOPE:
 {behavior_statistics}
 
-Infer the situation, alignment and soft response guidance for {speaker}. Evidence IDs may be empty;
+Infer the situation, User State, alignment and Behavior Policy for {speaker}. Evidence IDs may be empty;
 otherwise copy only visible IDs. Answer a direct partner question before any optional continuation."""
 
-ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation.
-Act as the person represented by the private Self Domain and use the private response guidance softly.
-Write the most likely natural message in the person's observed voice. Answer a direct question when the
-situation requires it. Do not force disclosure, reflection, emotion, praise, advice, or warmth. Follow
-question guidance, but do not manufacture a question when none is warranted. One or more natural message
-bubbles are allowed; there is no fixed bubble count or fixed length. Output only the message, not the
-speaker name, JSON, internal reasoning, or private guidance."""
+ACTOR_SYSTEM_TEMPLATE = """You are {speaker}. Continue the conversation as this person.
+
+Produce the target person's most likely next message at this exact point. The target is a real
+conversational participant, not an assistant, therapist, coach, evaluator, or generic empathy system.
+
+Use the complete real history before the target turn, the private Self Domain as the identity and behavior
+prior, and the current User State and Behavior Policy as guidance for this turn.
+
+Answer the partner's direct question when one exists. Preserve the target person's ordinary level of
+self-disclosure, warmth, reflection, questioning, message length, and topic continuation. Do not add generic
+empathy, therapy, advice, praise, or emotional analysis unless both the current exchange and the target's
+observed behavior support it. Do not copy facts from the partner into the target. Do not reveal private
+fields or reasoning. There is no fixed bubble count or sentence count. Use natural line breaks when the
+person would naturally send multiple message bubbles. Output only the target person's message."""
 
 ACTOR_FORMAL_TEMPLATE = """REFERENCE CONVERSATION WITH {reference_partner} ({reference_scope}):
 {reference_history}
@@ -193,8 +218,8 @@ CURRENT CONVERSATION TO CONTINUE (REAL HISTORY BEFORE YOUR NEXT TURN):
 CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 {conversation_position}
 
-PRIVATE RESPONSE GUIDANCE:
-{response_guidance}
+CURRENT USER STATE AND BEHAVIOR POLICY:
+{behavior_context}
 
 Use this as soft guidance rather than a script. Do not include JSON, speaker labels, or internal reasoning.
 
@@ -212,8 +237,8 @@ CURRENT CONVERSATION POSITION (KNOWN BEFORE YOUR NEXT TEXT):
 PRIVATE SELF DOMAIN COMPILED FROM THE REFERENCE SCOPE:
 {self_domain}
 
-PRIVATE RESPONSE GUIDANCE:
-{response_guidance}
+CURRENT USER STATE AND BEHAVIOR POLICY:
+{behavior_context}
 
 Use this as soft guidance rather than a script. Do not include JSON, speaker labels, or internal reasoning.
 
@@ -626,22 +651,90 @@ def build_generation_input(
 
 
 def behavior_statistics(turns: list[dict[str, Any]], speaker: str) -> dict[str, Any]:
-    """Compute a small, deterministic style prior without exposing Ca examples."""
+    """Compute deterministic style and conditional response priors without exposing Ca examples."""
     target = [turn for turn in turns if turn.get("speaker") == speaker]
     if not target:
         return {
             "target_message_count": 0, "mean_characters": 0.0,
-            "mean_bubbles": 0.0, "multi_bubble_rate": 0.0,
-            "question_rate": 0.0,
+            "median_characters": 0.0, "mean_bubbles": 0.0,
+            "multi_bubble_rate": 0.0, "question_rate": 0.0,
+            "self_disclosure_rate": 0.0, "reflection_rate": 0.0,
+            "direct_answer_rate": 0.0, "closure_rate": 0.0,
+            "conditional_statistics": {},
         }
     bubble_counts = [max(1, len(str(turn.get("content", "")).splitlines())) for turn in target]
     character_counts = [len(str(turn.get("content", ""))) for turn in target]
+    ordered = list(turns)
+
+    def looks_self_disclosing(text: str) -> bool:
+        return bool(re.search(
+            r"\b(i|i'm|i’ve|i've|i was|i am|i like|i love|i usually|i plan|my)\b",
+            text.casefold(),
+        ))
+
+    def looks_reflective(text: str) -> bool:
+        return bool(re.search(
+            r"\b(i think|i feel|i felt|i guess|because|made me|helps me|i wonder|in my opinion)\b",
+            text.casefold(),
+        ))
+
+    def classify_partner(text: str) -> str:
+        lowered = text.casefold()
+        if "?" in text or "？" in text:
+            return "asks_about_target" if re.search(r"\b(you|your|have you|did you|are you)\b", lowered) else "direct_question"
+        if re.search(r"\b(sorry|sad|happy|excited|worried|afraid|feel|feeling|upset|love|hate)\b", lowered):
+            return "partner_affect"
+        if re.search(r"\b(should|could|recommend|suggest|advice|think you should)\b", lowered):
+            return "opinion_or_advice"
+        return "partner_disclosure"
+
+    groups: dict[str, list[dict[str, Any]]] = {
+        key: [] for key in (
+            "direct_question", "partner_disclosure", "partner_affect",
+            "asks_about_target", "opinion_or_advice", "topic_continuation",
+            "conversation_closure",
+        )
+    }
+    previous_partner: dict[str, str] = {}
+    target_count = 0
+    answered_count = 0
+    for index, turn in enumerate(ordered):
+        if turn.get("speaker") != speaker:
+            continue
+        target_count += 1
+        previous = next((item for item in reversed(ordered[:index]) if item.get("speaker") != speaker), None)
+        if previous is None:
+            continue
+        partner_text = str(previous.get("content", ""))
+        group = classify_partner(partner_text)
+        groups[group].append(turn)
+        if "?" in partner_text or "？" in partner_text:
+            answered_count += 1
+    conditional = {}
+    for group, items in groups.items():
+        if not items:
+            conditional[group] = {"sample_count": 0}
+            continue
+        lengths = [len(str(item.get("content", ""))) for item in items]
+        conditional[group] = {
+            "sample_count": len(items),
+            "question_rate": round(sum("?" in str(item.get("content", "")) for item in items) / len(items), 3),
+            "self_disclosure_rate": round(sum(looks_self_disclosing(str(item.get("content", ""))) for item in items) / len(items), 3),
+            "reflection_rate": round(sum(looks_reflective(str(item.get("content", ""))) for item in items) / len(items), 3),
+            "mean_characters": round(sum(lengths) / len(lengths), 3),
+        }
     return {
         "target_message_count": len(target),
         "mean_characters": round(sum(character_counts) / len(character_counts), 3),
+        "median_characters": round(sorted(character_counts)[len(character_counts) // 2], 3),
         "mean_bubbles": round(sum(bubble_counts) / len(bubble_counts), 3),
         "multi_bubble_rate": round(sum(count > 1 for count in bubble_counts) / len(bubble_counts), 3),
         "question_rate": round(sum("?" in str(turn.get("content", "")) for turn in target) / len(target), 3),
+        "self_disclosure_rate": round(sum(looks_self_disclosing(str(turn.get("content", ""))) for turn in target) / len(target), 3),
+        "reflection_rate": round(sum(looks_reflective(str(turn.get("content", ""))) for turn in target) / len(target), 3),
+        "direct_answer_rate": round(answered_count / target_count, 3) if target_count else 0.0,
+        "closure_rate": round(sum(any(word in str(turn.get("content", "")).casefold() for word in ("bye", "goodnight", "speak soon", "talk later")) for turn in target) / len(target), 3),
+        "conditional_statistics": conditional,
     }
 
 
@@ -677,13 +770,10 @@ def actor_prompt(
     generation_input: dict[str, Any], self_domain: dict[str, Any],
     decision: dict[str, Any],
 ) -> str:
-    response_guidance = {
+    behavior_context = {
         "situation": decision["situation"],
-        "alignment": {
-            "orientation": decision["alignment"]["orientation"],
-            "affected_dimensions": decision["alignment"]["affected_dimensions"],
-        },
-        "response_guidance": decision["response_guidance"],
+        "user_state": decision["user_state"],
+        "behavior_policy": decision["behavior_policy"],
     }
     if generation_input["mode"] == "cb":
         return ACTOR_FORMAL_TEMPLATE.format(
@@ -694,14 +784,14 @@ def actor_prompt(
             self_domain=_json(self_domain),
             current_history=format_evidence_turns(generation_input["current_turns"]),
             conversation_position=_json(generation_input["conversation_position"]),
-            response_guidance=_json(response_guidance),
+            behavior_context=_json(behavior_context),
         )
     return ACTOR_DEV_TEMPLATE.format(
         speaker=generation_input["speaker"],
         reference_scope=generation_input["reference_scope"],
         current_history=format_evidence_turns(generation_input["current_turns"]),
         conversation_position=_json(generation_input["conversation_position"]),
-        self_domain=_json(self_domain), response_guidance=_json(response_guidance),
+        self_domain=_json(self_domain), behavior_context=_json(behavior_context),
     )
 
 
@@ -746,7 +836,7 @@ def _actor_call(
             if re.match(rf"^{re.escape(speaker)}\s*:", message, re.IGNORECASE):
                 raise ValueError("actor leaked the speaker label")
             if message.startswith(("{", "[")) or re.search(
-                r'"(?:situation|turn_plan|response_guidance|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
+                r'"(?:situation|user_state|behavior_policy|turn_plan|response_guidance|alignment|lambda_trace|self_domain)"\s*:', message, re.IGNORECASE
             ):
                 raise ValueError("actor leaked private structure")
         except Exception as exc:

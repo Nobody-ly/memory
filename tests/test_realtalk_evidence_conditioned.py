@@ -63,6 +63,15 @@ def _self_value(evidence_id: str) -> dict:
             "evidence_ids": [evidence_id],
             "confidence": 0.6,
         }],
+        "behavioral_conditions": [{
+            "trigger": "direct_question",
+            "likely_response": "Usually answers in a casual way.",
+            "question_tendency": "usually_none",
+            "disclosure_tendency": "moderate",
+            "reflection_tendency": "low",
+            "evidence_ids": [evidence_id],
+            "confidence": 0.7,
+        }],
         "uncertainties": ["Cross-partner transfer is uncertain."],
     }
 
@@ -93,14 +102,24 @@ def _decision_value(evidence_id: str | None = None) -> dict:
             "basis": "Keep the person's voice while staying responsive.",
             "affected_dimensions": ["tone"],
         },
-        "response_guidance": {
-            "must_address": ["Continue the active topic naturally in character."],
-            "optional_elements": [],
+        "user_state": {
+            "interaction_need": "topic_continuation",
+            "affect": "neutral",
+            "affect_confidence": 0.7,
+            "topic_continuity": "continue_current_topic",
+            "response_pressure": "low",
+        },
+        "behavior_policy": {
+            "primary_goal": "continue_topic",
+            "required_content": ["Continue the active topic naturally in character."],
+            "optional_content": [],
             "avoid": ["Do not turn this into a generic advice response."],
-            "question_permission": "none",
-            "self_disclosure_permission": "allowed_if_natural",
-            "reflection_permission": "allowed_if_supported",
-            "length_preference": "short",
+            "question_policy": "none",
+            "self_disclosure_policy": "allowed_if_natural",
+            "reflection_policy": "allowed_if_supported",
+            "topic_policy": "continue_current_topic",
+            "tone": "casual",
+            "length": "short",
         },
         "evidence_ids": [evidence_id] if evidence_id else [],
     }
@@ -200,12 +219,13 @@ class EvidenceSchemaTests(unittest.TestCase):
                 {"Chat.json::session_1:turn_0"},
             )
 
-    def test_v16_response_guidance_is_structural_and_enum_checked(self):
+    def test_v2_behavior_policy_and_conditions_are_structural(self):
         value = normalize_decision(_decision_value())
-        self.assertEqual(value["response_guidance"]["length_preference"], "short")
+        self.assertEqual(value["behavior_policy"]["length"], "short")
+        self.assertEqual(normalize_self_domain(_self_value("x"))["behavioral_conditions"][0]["trigger"], "direct_question")
         legacy = _decision_value()
-        legacy["turn_plan"] = {}
-        with self.assertRaisesRegex(ValueError, "extra=.*turn_plan"):
+        legacy["response_guidance"] = {}
+        with self.assertRaisesRegex(ValueError, "extra=.*response_guidance"):
             normalize_decision(legacy)
         invalid_dimension = _decision_value()
         invalid_dimension["alignment"]["affected_dimensions"] = ["invented"]
@@ -410,10 +430,22 @@ class EvidencePipelineTests(unittest.TestCase):
         system = ACTOR_SYSTEM_TEMPLATE.format(speaker="Emi")
         self.assertIn("You are Emi", system)
         self.assertIn("next-utterance prediction task", DECISION_SYSTEM_PROMPT)
-        self.assertIn("most likely natural message", system)
+        self.assertIn("most likely next message", system)
         for forbidden in ("Reflectiveness", "Grounding", "Intimacy", "Empathy"):
             self.assertNotIn(forbidden, system)
             self.assertNotIn(forbidden, DECISION_SYSTEM_PROMPT)
+
+    def test_actor_receives_state_and_policy_but_not_full_partner_domain(self):
+        dev, _ = prepare_ca_dev(DATASET)
+        item = dev[0]
+        point = item["points"][0]
+        generation_input = build_generation_input(item, point, empty_user_domain())
+        self_domain = _self_value(next(iter(evidence_ids(item["reference_turns"], item["speaker"]))))
+        prompt = actor_prompt(generation_input, self_domain, _decision_value())
+        self.assertIn("CURRENT USER STATE AND BEHAVIOR POLICY", prompt)
+        self.assertIn('"user_state"', prompt)
+        self.assertIn('"behavior_policy"', prompt)
+        self.assertNotIn('"update_summary"', prompt)
 
 
 if __name__ == "__main__":
