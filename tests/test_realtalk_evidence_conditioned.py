@@ -260,9 +260,11 @@ class EvidenceDataTests(unittest.TestCase):
         dev = build_gate_manifests(self.dev, "ca-dev")
         formal = build_gate_manifests(self.formal, "cb")
         self.assertEqual({key: len(value) for key, value in dev.items()}, {"6": 6, "24": 24, "68": 68})
-        self.assertEqual({key: len(value) for key, value in formal.items()}, {"10": 10, "30": 30, "90": 90, "519": 519})
+        self.assertEqual({key: len(value) for key, value in formal.items()}, {"12": 12, "24": 24, "60": 60, "120": 120, "519": 519})
         self.assertLessEqual(set(dev["6"]), set(dev["24"]))
-        self.assertLessEqual(set(formal["30"]), set(formal["90"]))
+        self.assertLessEqual(set(formal["12"]), set(formal["24"]))
+        self.assertLessEqual(set(formal["24"]), set(formal["60"]))
+        self.assertLessEqual(set(formal["60"]), set(formal["120"]))
 
     def test_contiguous_window_matches_the_frozen_v9_hard_segment(self):
         formal = build_gate_manifests(self.formal, "cb")

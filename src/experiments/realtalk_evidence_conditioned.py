@@ -54,7 +54,7 @@ DEV_FILES = (
     ("Chat_10_Fahim_Muhhamed.json", "Muhhamed", "Fahim Khan"),
 )
 DEV_GATES = (6, 24, 68)
-FORMAL_GATES = (10, 30, 90, 519)
+FORMAL_GATES = (12, 24, 60, 120, 519)
 
 
 SELF_SYSTEM_PROMPT = """You compile a private behavioral Self Domain for a persona simulation task.
@@ -604,16 +604,28 @@ def build_gate_manifests(prepared: list[dict[str, Any]], mode: str) -> dict[str,
                     if point["target_session"] == session_id
                 ])
             by_item_session.append(sessions)
-        gate10 = [sessions[0][0]["result_id"] for sessions in by_item_session]
-        gate30 = [
-            session[0]["result_id"] for sessions in by_item_session for session in sessions
+        gate12 = [
+            point["result_id"]
+            for sessions in by_item_session[:3]
+            for point in [p for session in sessions for p in session][:4]
         ]
-        gate90 = [
-            point["result_id"] for sessions in by_item_session for session in sessions
-            for point in session[:3]
+        gate24 = [
+            point["result_id"]
+            for sessions in by_item_session[:6]
+            for point in [p for session in sessions for p in session][:4]
+        ]
+        gate60 = [
+            point["result_id"]
+            for sessions in by_item_session
+            for point in [p for session in sessions for p in session][:6]
+        ]
+        gate120 = [
+            point["result_id"]
+            for sessions in by_item_session
+            for point in [p for session in sessions for p in session][:12]
         ]
         all_ids = [point["result_id"] for item in prepared for point in item["points"]]
-        manifests = {"10": gate10, "30": gate30, "90": gate90, "519": all_ids}
+        manifests = {"12": gate12, "24": gate24, "60": gate60, "120": gate120, "519": all_ids}
     previous: set[str] = set()
     for gate in sorted((int(value) for value in manifests)):
         ids = manifests[str(gate)]
