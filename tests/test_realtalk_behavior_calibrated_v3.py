@@ -66,12 +66,14 @@ def test_actor_prompt_makes_zero_question_contract_explicit():
     prompt = _actor_prompt(
         {"speaker": "Emi"},
         {"context_turns": []},
-        {},
+        {"identity_facts": [], "voice_profile": [], "social_profile": [], "behavior_by_scene": {"session_opening": {"usual_action": "ask_follow_up"}}, "observable_statistics": {"question_rate": 1.0}},
         {"user_state": {}, "behavior_policy": decision["behavior_policy"]},
         {},
     )
     assert "MUST contain no question mark" in prompt
     assert "Do not add a greeting question" in prompt
+    assert "behavior_by_scene" not in prompt
+    assert "observable_statistics" not in prompt
 
 
 def test_partner_question_slots_do_not_authorize_outbound_question():

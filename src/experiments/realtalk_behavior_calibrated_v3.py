@@ -196,6 +196,7 @@ ACTOR_SYSTEM_PROMPT = """You are {speaker}. Continue the conversation as this pe
 
 Produce only the target person's next message at this exact point. Use the complete real history, private Self Domain,
 current User State, and the selected Behavior Policy. Execute the selected primary_action and required content slots.
+The selected Behavior Policy is authoritative for this turn and overrides any general behavioral tendency.
 Do not invent another question, reflection, emotional interpretation, support statement, topic, or personal fact when
 it was not selected. When multiple question slots are selected, answer them in order. Match the target's observed
 length and message-shape tendency for this scene while preserving natural language.
@@ -475,6 +476,11 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
     policy = decision["behavior_policy"]
+    actor_self_view = {
+        "identity_facts": self_domain["identity_facts"],
+        "voice_profile": self_domain["voice_profile"],
+        "social_profile": self_domain["social_profile"],
+    }
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "
     question_contract += (
@@ -482,7 +488,7 @@ def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict
         if outbound_question_allowed
         else "The message MUST contain no question mark and must not ask any question."
     )
-    return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN:\n{_json(self_domain)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(policy)}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nHARD MESSAGE CONTRACT:\nExecute the selected primary action and required content only. {question_contract} Do not add a greeting question, follow-up question, reflection, self-disclosure, or topic that is not selected.\n\nWrite only {item['speaker']}'s next message."
+    return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN IDENTITY AND EXPRESSION VIEW:\n{_json(actor_self_view)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(policy)}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nHARD MESSAGE CONTRACT:\nThe selected policy overrides any general tendency for this turn. Execute the selected primary action and required content only. {question_contract} Do not add a greeting question, follow-up question, reflection, self-disclosure, or topic that is not selected.\n\nWrite only {item['speaker']}'s next message."
 
 
 def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int) -> dict[str, Any]:
