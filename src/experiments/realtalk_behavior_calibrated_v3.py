@@ -445,7 +445,8 @@ def _domain_prompt(item: dict[str, Any], stats: dict[str, Any]) -> str:
 
 
 def _user_prompt(speaker: str, partner: str, previous: dict[str, Any], completed: list[dict[str, Any]], allowed: set[str]) -> str:
-    return f"TARGET SPEAKER: {speaker}\nPARTNER: {partner}\nPREVIOUS USER DOMAIN:\n{_json(previous)}\nCOMPLETE FINISHED SESSION:\n{base.format_evidence_turns(completed)}\nALLOWED PARTNER EVIDENCE IDS:\n{_json(sorted(allowed))}"
+    target_ids = sorted(base.evidence_ids(completed, speaker))
+    return f"TARGET SPEAKER: {speaker}\nPARTNER: {partner}\nPREVIOUS USER DOMAIN:\n{_json(previous)}\nCOMPLETE FINISHED SESSION:\n{base.format_evidence_turns(completed)}\nALLOWED PARTNER EVIDENCE IDS (copy only these):\n{_json(sorted(allowed))}\nFORBIDDEN TARGET-SPEAKER EVIDENCE IDS (never cite these):\n{_json(target_ids)}\nThe output is a model of {partner}, not {speaker}. Every stored fact must be supported by one or more allowed partner IDs; target-speaker IDs are invalid even when the target message contains useful information."
 
 
 def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], user_domain: dict[str, Any], gate: dict[str, Any], stats: dict[str, Any]) -> str:
@@ -454,7 +455,13 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
-    return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN:\n{_json(self_domain)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(decision['behavior_policy'])}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nWrite only {item['speaker']}'s next message."
+    policy = decision["behavior_policy"]
+    question_contract = (
+        f"Selected question slots: {len(policy['selected_question_slots'])}. "
+        "If this is 0, the message MUST contain no question mark and no question. "
+        "If this is greater than 0, ask only the selected slots; do not invent another question."
+    )
+    return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN:\n{_json(self_domain)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(policy)}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nHARD MESSAGE CONTRACT:\nExecute the selected primary action and required content only. {question_contract} Do not add a greeting question, follow-up question, reflection, self-disclosure, or topic that is not selected.\n\nWrite only {item['speaker']}'s next message."
 
 
 def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int) -> dict[str, Any]:

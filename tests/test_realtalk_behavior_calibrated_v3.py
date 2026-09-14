@@ -7,6 +7,8 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     _normalize_decision,
     _scene_for,
     behavior_calibrator,
+    _actor_prompt,
+    _user_prompt,
 )
 
 
@@ -54,3 +56,27 @@ def test_schemas_have_fixed_scene_keys_and_strict_roots():
     assert set(SELF_DOMAIN_SCHEMA["schema"]["properties"]["behavior_by_scene"]["properties"]) == set(SCENES)
     assert SELF_DOMAIN_SCHEMA["schema"]["additionalProperties"] is False
     assert DECISION_SCHEMA["schema"]["additionalProperties"] is False
+
+
+def test_actor_prompt_makes_zero_question_contract_explicit():
+    decision = valid_decision()
+    decision["behavior_policy"]["selected_question_slots"] = []
+    prompt = _actor_prompt(
+        {"speaker": "Emi"},
+        {"context_turns": []},
+        {},
+        {"user_state": {}, "behavior_policy": decision["behavior_policy"]},
+        {},
+    )
+    assert "MUST contain no question mark" in prompt
+    assert "Do not add a greeting question" in prompt
+
+
+def test_user_prompt_separates_partner_and_target_evidence():
+    turns = [
+        {"session_id": "session_1", "speaker": "Partner", "content": "Hi", "source_id": "p1", "dia_ids": []},
+        {"session_id": "session_1", "speaker": "Target", "content": "Hello", "source_id": "t1", "dia_ids": []},
+    ]
+    prompt = _user_prompt("Target", "Partner", {}, turns, {"p1"})
+    assert "p1" in prompt and "t1" in prompt
+    assert "FORBIDDEN TARGET-SPEAKER EVIDENCE IDS" in prompt
