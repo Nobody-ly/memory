@@ -442,7 +442,7 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     if not outbound_question_allowed and question_count:
         raise ValueError("actor added an unselected outbound question")
     if outbound_question_allowed and question_count < 1:
-        raise ValueError("selected outbound question requires at least one question")
+        raise ValueError(f"selected outbound question requires at least one question about {policy['outbound_question_focus']!r}")
     if decision["behavior_policy"]["reflection_mode"] == "none" and _words(message, r"\b(i think|i feel|i guess|in my opinion|because)\b") and len(message) > 70:
         raise ValueError("actor added unsupported reflection")
     return message
@@ -495,7 +495,7 @@ def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "
     question_contract += (
-        "Every question must serve the selected mode and focus; do not add an unrelated question."
+        "You must include at least one natural question about the selected focus before ending; every question must serve the selected mode and focus."
         if outbound_question_allowed
         else "The message MUST contain no question mark and must not ask any question."
     )
