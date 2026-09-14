@@ -120,6 +120,8 @@ DECISION_SCHEMA = {
             "behavior_policy": {"type": "object", "properties": {
                 "primary_action": {"type": "string", "enum": list(PRIMARY_ACTIONS)},
                 "selected_question_slots": {"type": "array", "items": {"type": "string", "enum": list(QUESTION_SLOTS)}, "maxItems": 4},
+                "outbound_question_mode": {"type": "string", "enum": ["none", "opening", "reciprocal", "clarifying", "follow_up"]},
+                "outbound_question_focus": {"type": "string", "maxLength": 240},
                 "reflection_mode": {"type": "string", "enum": ["none", "brief", "supported"]},
                 "self_disclosure_mode": {"type": "string", "enum": ["none", "brief", "natural"]},
                 "grounding_mode": {"type": "string", "enum": ["none", "specific_acknowledgment", "clarifying_question"]},
@@ -128,7 +130,7 @@ DECISION_SCHEMA = {
                 "message_shape": {"type": "string", "enum": ["single_short", "single_typical", "multi_content"]},
                 "required_content_slots": {"type": "array", "items": {"type": "string", "maxLength": 240}, "minItems": 1, "maxItems": 4},
                 "forbidden_additions": {"type": "array", "items": {"type": "string", "maxLength": 80}, "maxItems": 6},
-            }, "required": ["primary_action", "selected_question_slots", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"], "additionalProperties": False},
+            }, "required": ["primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"], "additionalProperties": False},
             "evidence_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
         },
         "required": ["situation", "user_state", "relevant_user_domain", "alignment", "behavior_policy", "evidence_ids"],
@@ -170,8 +172,11 @@ identity prior, the five-layer User Domain only when relevant, the deterministic
 the Ca behavior prior, and already observed Cb behavior. Do not use any future turn, target answer, Judge label,
 previous generated message, or evaluation metric.
 
-A new session with no current partner message is session_opening, not a question. A factual partner statement is
-not automatically emotional support. A direct question requires an answer to selected slots. Choose exactly one
+A new session with no current partner message is session_opening, not an incoming question. A factual partner
+statement is not automatically emotional support. selected_question_slots may contain only question slots that
+exist in the supplied partner message and must be answered. They never authorize the target to ask a question.
+Use outbound_question_mode and outbound_question_focus for a target-originated opening, reciprocal, clarifying,
+or follow-up question; use none and an empty focus when no outbound question is selected. Choose exactly one
 primary_action and one concrete set of content slots. Optional behavior is not permission to add it: if it is not
 selected, it must not be generated. Do not add reflection, grounding, self-disclosure, empathy, praise, therapy
 language, or a follow-up question merely to sound helpful. Grounding is a specific response to partner content
@@ -181,8 +186,8 @@ lambda_trace is an auditable balance between stable target behavior and current-
 quota, empathy value, or sentence control. Keep identity as a hard constraint while allowing small evidence-based
 adaptation. The orientation and affected dimensions must match the one concrete policy.
 
-Use one policy object only. Never place a behavior in both a selected field and a forbidden field. If no question
-slot is selected, grounding_mode cannot be clarifying_question. If reflection_mode is none, do not require reflection.
+Use one policy object only. Never place a behavior in both a selected field and a forbidden field. grounding_mode
+may be clarifying_question only when outbound_question_mode is clarifying. If reflection_mode is none, do not require reflection.
 Moderate empathy requires an explicit affective partner signal. Multi-content requires at least two actual content
 slots. Return only strict JSON and do not draft the final message."""
 
@@ -320,16 +325,25 @@ def _normalize_decision(value: Any, allowed_ids: set[str], context: dict[str, An
     situation = _exact(root["situation"], {"scene", "partner_act", "topic", "uncertainty"}, "situation")
     state = _exact(root["user_state"], {"interaction_need", "affect", "affect_confidence", "topic_continuity", "response_pressure"}, "user_state")
     alignment = _exact(root["alignment"], {"orientation", "lambda_trace", "basis", "affected_dimensions"}, "alignment")
-    policy = _exact(root["behavior_policy"], {"primary_action", "selected_question_slots", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"}, "behavior_policy")
+    policy = _exact(root["behavior_policy"], {"primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"}, "behavior_policy")
     scene = _enum(situation["scene"], list(SCENES) + ["unclear"], "situation.scene")
     slots = _strings(policy["selected_question_slots"], "selected_question_slots", 4)
     if any(slot not in QUESTION_SLOTS for slot in slots) or len(set(slots)) != len(slots):
         raise ValueError("selected_question_slots must be unique q slots")
+    available_slots = {slot["slot_id"] for slot in context.get("question_slots", [])}
+    if set(slots) - available_slots:
+        raise ValueError("selected_question_slots cites a nonexistent partner question")
+    outbound_mode = _enum(policy["outbound_question_mode"], ("none", "opening", "reciprocal", "clarifying", "follow_up"), "outbound_question_mode")
+    if not isinstance(policy["outbound_question_focus"], str) or len(policy["outbound_question_focus"].strip()) > 240:
+        raise ValueError("outbound_question_focus must be text with at most 240 characters")
+    outbound_focus = policy["outbound_question_focus"].strip()
+    if (outbound_mode == "none") != (outbound_focus == ""):
+        raise ValueError("outbound question mode and focus disagree")
+    if outbound_mode == "opening" and scene != "session_opening":
+        raise ValueError("opening question is valid only at session opening")
     grounding = _enum(policy["grounding_mode"], ("none", "specific_acknowledgment", "clarifying_question"), "grounding_mode")
-    if grounding == "clarifying_question" and not slots:
-        raise ValueError("clarifying_question requires selected_question_slots")
-    if not slots and grounding == "clarifying_question":
-        raise ValueError("question contract conflict")
+    if (grounding == "clarifying_question") != (outbound_mode == "clarifying"):
+        raise ValueError("clarifying grounding and outbound question mode disagree")
     reflection = _enum(policy["reflection_mode"], ("none", "brief", "supported"), "reflection_mode")
     required_slots = _strings(policy["required_content_slots"], "required_content_slots", 4, True)
     if reflection == "none" and any("reflect" in x.casefold() for x in required_slots):
@@ -349,7 +363,7 @@ def _normalize_decision(value: Any, allowed_ids: set[str], context: dict[str, An
         "user_state": {"interaction_need": _enum(state["interaction_need"], ("information_exchange", "emotional_acknowledgment", "reciprocal_sharing", "clarification", "topic_continuation", "closing", "unclear"), "interaction_need"), "affect": _enum(state["affect"], ("positive", "neutral", "negative", "mixed", "unclear"), "affect"), "affect_confidence": _float(state["affect_confidence"], "affect_confidence"), "topic_continuity": _enum(state["topic_continuity"], ("continue", "new", "unclear"), "topic_continuity"), "response_pressure": _enum(state["response_pressure"], ("low", "medium", "high"), "response_pressure")},
         "relevant_user_domain": _strings(root["relevant_user_domain"], "relevant_user_domain", 2),
         "alignment": {"orientation": _enum(alignment["orientation"], ("self_led", "balanced", "partner_adaptive"), "orientation"), "lambda_trace": _float(alignment["lambda_trace"], "lambda_trace"), "basis": _text(alignment["basis"], "basis", 320), "affected_dimensions": _strings(alignment["affected_dimensions"], "affected_dimensions", 4, True)},
-        "behavior_policy": {"primary_action": _enum(policy["primary_action"], PRIMARY_ACTIONS, "primary_action"), "selected_question_slots": slots, "reflection_mode": reflection, "self_disclosure_mode": _enum(policy["self_disclosure_mode"], ("none", "brief", "natural"), "self_disclosure_mode"), "grounding_mode": grounding, "empathy_mode": _enum(policy["empathy_mode"], ("none", "light", "moderate"), "empathy_mode"), "intimacy_mode": _enum(policy["intimacy_mode"], ("match", "slightly_warm", "reserved"), "intimacy_mode"), "message_shape": message_shape, "required_content_slots": required_slots, "forbidden_additions": _strings(policy["forbidden_additions"], "forbidden_additions", 6)},
+        "behavior_policy": {"primary_action": _enum(policy["primary_action"], PRIMARY_ACTIONS, "primary_action"), "selected_question_slots": slots, "outbound_question_mode": outbound_mode, "outbound_question_focus": outbound_focus, "reflection_mode": reflection, "self_disclosure_mode": _enum(policy["self_disclosure_mode"], ("none", "brief", "natural"), "self_disclosure_mode"), "grounding_mode": grounding, "empathy_mode": _enum(policy["empathy_mode"], ("none", "light", "moderate"), "empathy_mode"), "intimacy_mode": _enum(policy["intimacy_mode"], ("match", "slightly_warm", "reserved"), "intimacy_mode"), "message_shape": message_shape, "required_content_slots": required_slots, "forbidden_additions": _strings(policy["forbidden_additions"], "forbidden_additions", 6)},
         "evidence_ids": evidence,
     }
 
@@ -415,11 +429,11 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
         raise ValueError("actor leaked private structure")
     policy = decision["behavior_policy"]
     question_count = message.count("?") + message.count("？")
-    outbound_question_allowed = policy["grounding_mode"] == "clarifying_question"
+    outbound_question_allowed = policy["outbound_question_mode"] != "none"
     if not outbound_question_allowed and question_count:
         raise ValueError("actor added an unselected outbound question")
     if outbound_question_allowed and question_count != 1:
-        raise ValueError("clarifying_question requires exactly one outbound question")
+        raise ValueError("selected outbound question requires exactly one question")
     if decision["behavior_policy"]["reflection_mode"] == "none" and _words(message, r"\b(i think|i feel|i guess|in my opinion|because)\b") and len(message) > 70:
         raise ValueError("actor added unsupported reflection")
     return message
@@ -461,10 +475,10 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
     policy = decision["behavior_policy"]
-    outbound_question_allowed = policy["grounding_mode"] == "clarifying_question"
-    question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound clarifying question allowed: {str(outbound_question_allowed).lower()}. "
+    outbound_question_allowed = policy["outbound_question_mode"] != "none"
+    question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "
     question_contract += (
-        "Ask exactly one concrete clarification and no other question."
+        "Ask exactly one question of the selected mode and focus, and no other question."
         if outbound_question_allowed
         else "The message MUST contain no question mark and must not ask any question."
     )

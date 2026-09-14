@@ -35,7 +35,7 @@ def valid_decision():
         "user_state": {"interaction_need": "information_exchange", "affect": "neutral", "affect_confidence": 0.8, "topic_continuity": "continue", "response_pressure": "high"},
         "relevant_user_domain": [],
         "alignment": {"orientation": "self_led", "lambda_trace": 0.2, "basis": "Answer the current question in the target's normal style.", "affected_dimensions": ["content_focus"]},
-        "behavior_policy": {"primary_action": "answer", "selected_question_slots": ["q1"], "reflection_mode": "none", "self_disclosure_mode": "brief", "grounding_mode": "none", "empathy_mode": "none", "intimacy_mode": "match", "message_shape": "single_typical", "required_content_slots": ["answer q1"], "forbidden_additions": ["unsolicited_exploration"]},
+        "behavior_policy": {"primary_action": "answer", "selected_question_slots": ["q1"], "outbound_question_mode": "none", "outbound_question_focus": "", "reflection_mode": "none", "self_disclosure_mode": "brief", "grounding_mode": "none", "empathy_mode": "none", "intimacy_mode": "match", "message_shape": "single_typical", "required_content_slots": ["answer q1"], "forbidden_additions": ["unsolicited_exploration"]},
         "evidence_ids": [],
     }
 
@@ -44,14 +44,14 @@ def test_decision_contract_rejects_multi_content_without_two_slots():
     value = valid_decision()
     value["behavior_policy"]["message_shape"] = "multi_content"
     with pytest.raises(ValueError, match="multi_content"):
-        _normalize_decision(value, set(), {})
+        _normalize_decision(value, set(), {"question_slots": [{"slot_id": "q1"}]})
 
 
 def test_decision_contract_rejects_moderate_empathy_without_affect():
     value = valid_decision()
     value["behavior_policy"]["empathy_mode"] = "moderate"
     with pytest.raises(ValueError, match="moderate empathy"):
-        _normalize_decision(value, set(), {})
+        _normalize_decision(value, set(), {"question_slots": [{"slot_id": "q1"}]})
 
 
 def test_schemas_have_fixed_scene_keys_and_strict_roots():
@@ -83,9 +83,26 @@ def test_partner_question_slots_do_not_authorize_outbound_question():
 def test_clarifying_question_requires_exactly_one_outbound_question():
     decision = valid_decision()
     decision["behavior_policy"]["grounding_mode"] = "clarifying_question"
+    decision["behavior_policy"]["outbound_question_mode"] = "clarifying"
+    decision["behavior_policy"]["outbound_question_focus"] = "which day"
     assert _normalize_actor("Which day do you mean?", "Emi", decision) == "Which day do you mean?"
     with pytest.raises(ValueError, match="exactly one"):
         _normalize_actor("I am not sure.", "Emi", decision)
+
+
+def test_decision_rejects_nonexistent_partner_question_slot():
+    with pytest.raises(ValueError, match="nonexistent partner question"):
+        _normalize_decision(valid_decision(), set(), {"question_slots": []})
+
+
+def test_opening_outbound_question_is_independent_of_partner_slots():
+    value = valid_decision()
+    value["situation"]["scene"] = "session_opening"
+    value["behavior_policy"]["selected_question_slots"] = []
+    value["behavior_policy"]["outbound_question_mode"] = "opening"
+    value["behavior_policy"]["outbound_question_focus"] = "how the partner is doing"
+    normalized = _normalize_decision(value, set(), {"question_slots": []})
+    assert normalized["behavior_policy"]["outbound_question_mode"] == "opening"
 
 
 def test_user_prompt_separates_partner_and_target_evidence():
