@@ -313,7 +313,7 @@ Decision输入：完整因果历史、Self Domain、五层User Domain、确定�
 primary_action = greet | answer | acknowledge | self_disclose | state_or_opinion | brief_reflect | close | clarify | mixed_answer
 ```
 
-`selected_question_slots`只表示必须回答的伙伴问题槽位，不能授权目标人物主动提问；主动问题由`outbound_question_mode`和`outbound_question_focus`单独控制。`outbound_question_mode=none`时focus必须为空且Actor不得产生问题；非none时focus必须非空且Actor恰好产生一个对应问题。`grounding_mode=clarifying_question`只允许与`outbound_question_mode=clarifying`同时出现。`reflection_mode=none`时不得把反思作为required slot；`empathy_mode`只能在partner_affect或明确负面情绪时取moderate；`message_shape=multi_content`必须有至少两个不同required content slots或一个明确的多问题场景。
+`selected_question_slots`只表示必须回答的伙伴问题槽位，不能授权目标人物主动提问；主动问题由`outbound_question_mode`和`outbound_question_focus`单独控制。`outbound_question_mode=none`时focus必须为空且Actor不得产生问题；非none时focus必须非空且Actor至少产生一个对应问题，多个自然短问句必须服务于同一focus。纯Session opening只允许`none|opening`，不能误标为`reciprocal`。`grounding_mode=clarifying_question`只允许与`outbound_question_mode=clarifying`同时出现。`reflection_mode=none`时不得把反思作为required slot；`empathy_mode`只能在partner_affect或明确负面情绪时取moderate；`message_shape=multi_content`必须有至少两个不同required content slots或一个明确的多问题场景。
 
 ### Decision system prompt
 

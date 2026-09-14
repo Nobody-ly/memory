@@ -342,6 +342,8 @@ def _normalize_decision(value: Any, allowed_ids: set[str], context: dict[str, An
         raise ValueError("outbound question mode and focus disagree")
     if outbound_mode == "opening" and scene != "session_opening":
         raise ValueError("opening question is valid only at session opening")
+    if scene == "session_opening" and outbound_mode not in {"none", "opening"}:
+        raise ValueError("session opening allows only none or opening outbound question mode")
     grounding = _enum(policy["grounding_mode"], ("none", "specific_acknowledgment", "clarifying_question"), "grounding_mode")
     if (grounding == "clarifying_question") != (outbound_mode == "clarifying"):
         raise ValueError("clarifying grounding and outbound question mode disagree")
@@ -433,8 +435,8 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     if not outbound_question_allowed and question_count:
         raise ValueError("actor added an unselected outbound question")
-    if outbound_question_allowed and question_count != 1:
-        raise ValueError("selected outbound question requires exactly one question")
+    if outbound_question_allowed and question_count < 1:
+        raise ValueError("selected outbound question requires at least one question")
     if decision["behavior_policy"]["reflection_mode"] == "none" and _words(message, r"\b(i think|i feel|i guess|in my opinion|because)\b") and len(message) > 70:
         raise ValueError("actor added unsupported reflection")
     return message
@@ -484,7 +486,7 @@ def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "
     question_contract += (
-        "Ask exactly one question of the selected mode and focus, and no other question."
+        "Every question must serve the selected mode and focus; do not add an unrelated question."
         if outbound_question_allowed
         else "The message MUST contain no question mark and must not ask any question."
     )

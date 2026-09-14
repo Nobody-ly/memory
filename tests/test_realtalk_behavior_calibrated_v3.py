@@ -82,13 +82,14 @@ def test_partner_question_slots_do_not_authorize_outbound_question():
         _normalize_actor("Sure, I can do that. Anything else?", "Emi", decision)
 
 
-def test_clarifying_question_requires_exactly_one_outbound_question():
+def test_clarifying_question_requires_an_outbound_question():
     decision = valid_decision()
     decision["behavior_policy"]["grounding_mode"] = "clarifying_question"
     decision["behavior_policy"]["outbound_question_mode"] = "clarifying"
     decision["behavior_policy"]["outbound_question_focus"] = "which day"
     assert _normalize_actor("Which day do you mean?", "Emi", decision) == "Which day do you mean?"
-    with pytest.raises(ValueError, match="exactly one"):
+    assert _normalize_actor("Which day, and what time?", "Emi", decision) == "Which day, and what time?"
+    with pytest.raises(ValueError, match="at least one"):
         _normalize_actor("I am not sure.", "Emi", decision)
 
 
@@ -105,6 +106,16 @@ def test_opening_outbound_question_is_independent_of_partner_slots():
     value["behavior_policy"]["outbound_question_focus"] = "how the partner is doing"
     normalized = _normalize_decision(value, set(), {"question_slots": []})
     assert normalized["behavior_policy"]["outbound_question_mode"] == "opening"
+
+
+def test_session_opening_rejects_reciprocal_question_mode():
+    value = valid_decision()
+    value["situation"]["scene"] = "session_opening"
+    value["behavior_policy"]["selected_question_slots"] = []
+    value["behavior_policy"]["outbound_question_mode"] = "reciprocal"
+    value["behavior_policy"]["outbound_question_focus"] = "partner wellbeing"
+    with pytest.raises(ValueError, match="session opening"):
+        _normalize_decision(value, set(), {"question_slots": []})
 
 
 def test_user_prompt_separates_partner_and_target_evidence():
