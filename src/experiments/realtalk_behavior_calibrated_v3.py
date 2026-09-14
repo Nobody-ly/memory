@@ -222,6 +222,7 @@ class Config:
     timeout_seconds: int = 240
     fresh: bool = False
     resume: bool = False
+    parent_output: str | None = None
     preflight_only: bool = False
 
 
@@ -585,8 +586,40 @@ def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict
     return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN IDENTITY AND EXPRESSION VIEW:\n{_json(actor_self_view)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(policy)}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nHARD MESSAGE CONTRACT:\nThe selected policy overrides any general tendency for this turn. Execute the selected primary action and required content only. {question_contract} Do not add a greeting question, follow-up question, reflection, self-disclosure, or topic that is not selected.\n\nWrite only {item['speaker']}'s next message."
 
 
-def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int) -> dict[str, Any]:
-    return {"protocol": PROTOCOL, "mode": "cb", "gate": gate, "model": MODEL, "thinking_enabled_all_stages": False, "dataset": dataset_manifest, "selected_ids_sha256": _hash(selected_ids), "prompt_hashes": _prompt_hashes(), "schema_hashes": {"self": _hash(SELF_DOMAIN_SCHEMA), "user": _hash(USER_DOMAIN_SCHEMA), "decision": _hash(DECISION_SCHEMA)}, "history_compression_enabled": False, "history_truncation_enabled": False, "generated_outputs_rolled_into_history": False, "omega_enabled": False, "future_user_state_enabled": False, "semantic_verification_or_candidate_search": False, "v2_outputs_read": False, "judge_labels_read": False, "ground_truth_read_by_generation": False}
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int, parent_output: Path | None = None) -> dict[str, Any]:
+    manifest = {"protocol": PROTOCOL, "mode": "cb", "gate": gate, "model": MODEL, "thinking_enabled_all_stages": False, "dataset": dataset_manifest, "selected_ids_sha256": _hash(selected_ids), "prompt_hashes": _prompt_hashes(), "schema_hashes": {"self": _hash(SELF_DOMAIN_SCHEMA), "user": _hash(USER_DOMAIN_SCHEMA), "decision": _hash(DECISION_SCHEMA)}, "history_compression_enabled": False, "history_truncation_enabled": False, "generated_outputs_rolled_into_history": False, "omega_enabled": False, "future_user_state_enabled": False, "semantic_verification_or_candidate_search": False, "v2_outputs_read": False, "judge_labels_read": False, "ground_truth_read_by_generation": False}
+    if parent_output is not None:
+        manifest["parent_output"] = str(parent_output)
+        manifest["parent_manifest_sha256"] = _file_sha256(parent_output / "manifest.json")
+    return manifest
+
+
+def _seed_parent_checkpoint(checkpoint: OperationCheckpoint, parent_output: Path, selected_ids: set[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    parent_manifest_path = parent_output / "manifest.json"
+    parent_checkpoint_path = parent_output / "checkpoint.json"
+    if not parent_manifest_path.exists() or not parent_checkpoint_path.exists():
+        raise ValueError("parent output must contain manifest.json and checkpoint.json")
+    parent_manifest = json.loads(parent_manifest_path.read_text(encoding="utf-8"))
+    if parent_manifest.get("protocol") != PROTOCOL or parent_manifest.get("status") != "generation_complete":
+        raise ValueError("parent output is not a complete run of the same V3.1.1 protocol")
+    if parent_manifest.get("unresolved_count", 1) != 0:
+        raise ValueError("parent output contains unresolved errors")
+    parent_checkpoint = json.loads(parent_checkpoint_path.read_text(encoding="utf-8"))
+    parent_results = parent_checkpoint.get("results", {})
+    if not set(parent_results).issubset(selected_ids):
+        raise ValueError("parent results are not a subset of the requested gate")
+    checkpoint.data["operations"].update(parent_checkpoint.get("operations", {}))
+    checkpoint.data["results"].update(parent_results)
+    checkpoint.save()
+    self_path = parent_output / "self_domains.json"
+    user_path = parent_output / "user_domains.json"
+    self_domains = json.loads(self_path.read_text(encoding="utf-8")) if self_path.exists() else {}
+    user_domains = json.loads(user_path.read_text(encoding="utf-8")) if user_path.exists() else {}
+    return self_domains, user_domains
 
 
 def _v3_gate_manifests(prepared: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -639,13 +672,14 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
     index = {point["result_id"]: (item, point) for item in prepared for point in item["points"]}
     selected_speakers = {index[rid][0]["speaker"] for rid in selected_ids}
     output = Path(config.output_dir).resolve(); output.mkdir(parents=True, exist_ok=True)
+    parent_output = Path(config.parent_output).resolve() if config.parent_output else None
     if config.fresh:
         for name in ("checkpoint.json", "raw_responses.jsonl", "predictions.jsonl", "self_domains.json", "user_domains.json", "manifest.json", "unresolved_errors.jsonl", "GENERATION_COMPLETE"):
             (output/name).unlink(missing_ok=True)
     backend = backend or _backend_from_env(MODEL)
     if backend.model != MODEL:
         raise ValueError(f"backend model mismatch: {backend.model}")
-    manifest = _manifest(dataset_manifest, selected_ids, config.gate)
+    manifest = _manifest(dataset_manifest, selected_ids, config.gate, parent_output)
     signature = _hash({"manifest": manifest, "config": {k:v for k,v in asdict(config).items() if k not in {"output_dir", "fresh", "resume", "gate"}}})
     checkpoint = OperationCheckpoint(output/"checkpoint.json", signature)
     if config.preflight_only:
@@ -654,6 +688,8 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
     raw_audit = output/"raw_responses.jsonl"
     self_domains: dict[str, dict[str, Any]] = {}
     user_domains: dict[str, dict[str, dict[str, Any]]] = {}
+    if parent_output is not None:
+        self_domains, user_domains = _seed_parent_checkpoint(checkpoint, parent_output, set(selected_ids))
     for item in prepared:
         speaker = item["speaker"]
         if speaker not in selected_speakers:
@@ -663,7 +699,10 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
         self_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:self:{base._safe_id(speaker)}", system_prompt=SELF_SYSTEM_PROMPT, user_prompt=_domain_prompt(item, stats), schema=SELF_DOMAIN_SCHEMA, normalizer=lambda value, allowed=allowed_self: _normalize_self(value, allowed), max_tokens=4096, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
         self_domains[speaker] = self_result["data"]
         by_session = {s:[t for t in item["current_turns"] if t["session_id"]==s] for s in ("session_1", "session_2", "session_3")}
-        domain = empty_user_domain(); user_domains[speaker] = {"session_1": domain}; allowed_partner: set[str] = set()
+        existing_domains = user_domains.get(speaker, {})
+        domain = existing_domains.get("session_1", empty_user_domain())
+        user_domains[speaker] = dict(existing_domains) if existing_domains else {"session_1": domain}
+        allowed_partner: set[str] = set()
         needed = {index[rid][1]["target_session"] for rid in selected_ids if index[rid][0]["speaker"]==speaker}
         for previous_index, next_session in ((1,"session_2"),(2,"session_3")):
             if not any(int(s.split("_")[1]) >= int(next_session.split("_")[1]) for s in needed):
@@ -702,9 +741,10 @@ def main() -> None:
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--parent-output")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
-    result = run(Config(dataset_dir=args.dataset_dir, output_dir=args.output_dir, gate=args.gate, model=args.model, fresh=args.fresh, resume=args.resume, preflight_only=args.preflight_only))
+    result = run(Config(dataset_dir=args.dataset_dir, output_dir=args.output_dir, gate=args.gate, model=args.model, fresh=args.fresh, resume=args.resume, parent_output=args.parent_output, preflight_only=args.preflight_only))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
