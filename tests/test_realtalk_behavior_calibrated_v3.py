@@ -7,6 +7,7 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     _normalize_decision,
     _normalize_actor,
     _normalize_self,
+    _normalize_user_v3,
     _scene_for,
     behavior_calibrator,
     _actor_prompt,
@@ -163,3 +164,36 @@ def test_actor_view_filters_turn_behavior_from_voice_profile():
         {},
     )
     assert "asks questions" not in prompt
+
+
+def test_user_domain_merges_only_exact_duplicate_facts():
+    value = {
+        layer: [] for layer in ("core", "regulation", "cognition", "identity", "behavior")
+    }
+    value["regulation"] = [
+        {"value": "Politely ends conversation with good night", "evidence_ids": ["e1"], "confidence": 0.7},
+        {"value": "  politely  ends conversation with GOOD NIGHT ", "evidence_ids": ["e2", "e1"], "confidence": 0.9},
+        {"value": "Politely ends the conversation with good night", "evidence_ids": ["e3"], "confidence": 0.8},
+    ]
+    value["update_summary"] = {"added": [], "revised": [], "retained": [], "withdrawn": []}
+
+    normalized = _normalize_user_v3(value, {"e1", "e2", "e3"})
+
+    assert len(normalized["regulation"]) == 2
+    assert normalized["regulation"][0]["evidence_ids"] == ["e1", "e2"]
+    assert normalized["regulation"][0]["confidence"] == 0.9
+    assert normalized["regulation"][1]["value"] == "Politely ends the conversation with good night"
+
+
+def test_user_domain_duplicate_merge_does_not_hide_invalid_evidence():
+    value = {
+        layer: [] for layer in ("core", "regulation", "cognition", "identity", "behavior")
+    }
+    value["regulation"] = [
+        {"value": "Politely closes", "evidence_ids": ["e1"], "confidence": 0.7},
+        {"value": "politely closes", "evidence_ids": ["invisible"], "confidence": 0.8},
+    ]
+    value["update_summary"] = {"added": [], "revised": [], "retained": [], "withdrawn": []}
+
+    with pytest.raises(ValueError, match="invalid evidence IDs"):
+        _normalize_user_v3(value, {"e1"})

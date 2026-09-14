@@ -293,6 +293,54 @@ def _strings(value: Any, path: str, max_items: int = 20, nonempty: bool = False)
     return result
 
 
+def _normalize_user_v3(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
+    """Merge only exact duplicate profile facts before strict validation."""
+    if not isinstance(value, dict):
+        return validate_evidence_ids(normalize_user_domain(value), allowed_ids)
+
+    prepared = dict(value)
+    expected_fact_keys = {"value", "evidence_ids", "confidence"}
+    for layer in PROFILE_LAYERS:
+        raw_facts = value.get(layer)
+        if not isinstance(raw_facts, list):
+            continue
+
+        merged: list[Any] = []
+        positions: dict[str, int] = {}
+        for raw in raw_facts:
+            if (
+                not isinstance(raw, dict)
+                or set(raw) != expected_fact_keys
+                or not isinstance(raw.get("value"), str)
+                or not isinstance(raw.get("evidence_ids"), list)
+                or not all(isinstance(item, str) for item in raw["evidence_ids"])
+                or not isinstance(raw.get("confidence"), (int, float))
+            ):
+                merged.append(raw)
+                continue
+
+            key = " ".join(raw["value"].split()).casefold()
+            if not key or key not in positions:
+                positions[key] = len(merged)
+                merged.append(dict(raw))
+                continue
+
+            previous = merged[positions[key]]
+            combined_ids = list(previous["evidence_ids"])
+            for evidence_id in raw["evidence_ids"]:
+                if evidence_id not in combined_ids:
+                    combined_ids.append(evidence_id)
+            invalid = set(combined_ids) - allowed_ids
+            if invalid:
+                raise ValueError(f"invalid evidence IDs: {sorted(invalid)}")
+            previous["evidence_ids"] = combined_ids[:4]
+            previous["confidence"] = max(previous["confidence"], raw["confidence"])
+
+        prepared[layer] = merged
+
+    return validate_evidence_ids(normalize_user_domain(prepared), allowed_ids)
+
+
 def _normalize_self(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
     root = _exact(value, {"identity_facts", "voice_profile", "social_profile", "behavior_by_scene", "uncertainties", "observable_statistics"}, "self_domain")
     result: dict[str, Any] = {"identity_facts": [], "voice_profile": [], "social_profile": [], "uncertainties": _strings(root["uncertainties"], "uncertainties", 4)}
@@ -586,7 +634,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
             if not any(int(s.split("_")[1]) >= int(next_session.split("_")[1]) for s in needed):
                 continue
             completed = by_session[f"session_{previous_index}"]; allowed_partner |= base.evidence_ids(completed, item["partner"])
-            user_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:user:{base._safe_id(speaker)}:after:{previous_index}", system_prompt=USER_SYSTEM_PROMPT, user_prompt=_user_prompt(speaker, item["partner"], domain, completed, allowed_partner), schema=USER_DOMAIN_SCHEMA, normalizer=lambda value, allowed=set(allowed_partner): validate_evidence_ids(normalize_user_domain(value), allowed), max_tokens=4096, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
+            user_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:user:{base._safe_id(speaker)}:after:{previous_index}", system_prompt=USER_SYSTEM_PROMPT, user_prompt=_user_prompt(speaker, item["partner"], domain, completed, allowed_partner), schema=USER_DOMAIN_SCHEMA, normalizer=lambda value, allowed=set(allowed_partner): _normalize_user_v3(value, allowed), max_tokens=4096, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
             domain = user_result["data"]; user_domains[speaker][next_session] = domain
     for rid in selected_ids:
         if rid in checkpoint.data["results"]:
