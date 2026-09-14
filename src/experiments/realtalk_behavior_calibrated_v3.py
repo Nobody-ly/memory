@@ -145,6 +145,11 @@ The target is a real conversational participant, not an assistant, therapist, co
 empathetic personality. Use only the target speaker's own messages as evidence for identity, style, and behavior.
 Partner messages may explain the interaction scene but must never become target facts.
 
+identity_facts contains durable self facts. voice_profile contains only surface language form such as wording,
+register, punctuation, brevity, message shape, and stylistic markers. Do not put asks_questions, answers,
+follows_up, reflects, self_discloses, supports, comforts, or greets in voice_profile; those turn behaviors belong
+only in behavior_by_scene. social_profile contains stable relational stance or boundaries, not a turn instruction.
+
 Fill the seven fixed behavior scene keys independently: session_opening, direct_question, partner_affect,
 partner_disclosure, opinion_or_advice, conversation_closure, and topic_continuation. A direct question must be
 classified as direct_question. A factual partner sharing is partner_disclosure. An opinion request is
@@ -300,7 +305,10 @@ def _normalize_self(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
             ids = _strings(item["evidence_ids"], f"{section}[{i}].evidence_ids", 4, True)
             if set(ids) - allowed_ids:
                 raise ValueError(f"{section}[{i}] cites invisible evidence")
-            result[section].append({"value": _text(item["value"], f"{section}[{i}].value", 160), "evidence_ids": ids, "confidence": _float(item["confidence"], f"{section}[{i}].confidence")})
+            normalized_value = _text(item["value"], f"{section}[{i}].value", 160)
+            if section == "voice_profile" and _words(normalized_value, r"\b(ask|asks|question|questions|answer|answers|respond|responds|reply|replies|follow.?up|reflect|reflects|self.?disclos|support|supports|comfort|comforts|greet|greets)\b"):
+                raise ValueError("voice_profile contains a turn behavior that belongs in behavior_by_scene")
+            result[section].append({"value": normalized_value, "evidence_ids": ids, "confidence": _float(item["confidence"], f"{section}[{i}].confidence")})
     scenes = _exact(root["behavior_by_scene"], set(SCENES), "behavior_by_scene")
     result["behavior_by_scene"] = {}
     for scene_name in SCENES:
@@ -481,7 +489,6 @@ def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict
     actor_self_view = {
         "identity_facts": self_domain["identity_facts"],
         "voice_profile": self_domain["voice_profile"],
-        "social_profile": self_domain["social_profile"],
     }
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "

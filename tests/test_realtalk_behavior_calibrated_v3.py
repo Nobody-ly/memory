@@ -74,6 +74,7 @@ def test_actor_prompt_makes_zero_question_contract_explicit():
     assert "Do not add a greeting question" in prompt
     assert "behavior_by_scene" not in prompt
     assert "observable_statistics" not in prompt
+    assert "social_profile" not in prompt
 
 
 def test_partner_question_slots_do_not_authorize_outbound_question():
@@ -139,4 +140,17 @@ def test_self_domain_compact_budget_is_enforced():
     }
     value["identity_facts"] = [{"value": "x", "evidence_ids": ["e1"], "confidence": 0.5}] * 7
     with pytest.raises(ValueError, match="compact list"):
+        _normalize_self(value, {"e1"})
+
+
+def test_voice_profile_rejects_turn_behavior():
+    value = {
+        "identity_facts": [],
+        "voice_profile": [{"value": "asks questions", "evidence_ids": ["e1"], "confidence": 0.8}],
+        "social_profile": [],
+        "behavior_by_scene": {scene: {} for scene in SCENES},
+        "uncertainties": [],
+        "observable_statistics": {},
+    }
+    with pytest.raises(ValueError, match="behavior_by_scene"):
         _normalize_self(value, {"e1"})
