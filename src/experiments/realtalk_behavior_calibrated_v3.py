@@ -306,8 +306,6 @@ def _normalize_self(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
             if set(ids) - allowed_ids:
                 raise ValueError(f"{section}[{i}] cites invisible evidence")
             normalized_value = _text(item["value"], f"{section}[{i}].value", 160)
-            if section == "voice_profile" and _words(normalized_value, r"\b(ask|asks|question|questions|answer|answers|respond|responds|reply|replies|follow.?up|reflect|reflects|self.?disclos|support|supports|comfort|comforts|greet|greets)\b"):
-                raise ValueError("voice_profile contains a turn behavior that belongs in behavior_by_scene")
             result[section].append({"value": normalized_value, "evidence_ids": ids, "confidence": _float(item["confidence"], f"{section}[{i}].confidence")})
     scenes = _exact(root["behavior_by_scene"], set(SCENES), "behavior_by_scene")
     result["behavior_by_scene"] = {}
@@ -486,9 +484,13 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
     policy = decision["behavior_policy"]
+    turn_behavior_pattern = r"\b(ask|asks|question|questions|answer|answers|respond|responds|reply|replies|follow.?up|reflect|reflects|self.?disclos|support|supports|comfort|comforts|greet|greets)\b"
     actor_self_view = {
         "identity_facts": self_domain["identity_facts"],
-        "voice_profile": self_domain["voice_profile"],
+        "voice_profile": [
+            fact for fact in self_domain["voice_profile"]
+            if not _words(fact["value"], turn_behavior_pattern)
+        ],
     }
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "

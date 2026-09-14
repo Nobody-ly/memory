@@ -143,7 +143,7 @@ def test_self_domain_compact_budget_is_enforced():
         _normalize_self(value, {"e1"})
 
 
-def test_voice_profile_rejects_turn_behavior():
+def test_actor_view_filters_turn_behavior_from_voice_profile():
     value = {
         "identity_facts": [],
         "voice_profile": [{"value": "asks questions", "evidence_ids": ["e1"], "confidence": 0.8}],
@@ -152,5 +152,14 @@ def test_voice_profile_rejects_turn_behavior():
         "uncertainties": [],
         "observable_statistics": {},
     }
-    with pytest.raises(ValueError, match="behavior_by_scene"):
-        _normalize_self(value, {"e1"})
+    normalized = _normalize_self(value, {"e1"})
+    decision = valid_decision()
+    decision["behavior_policy"]["selected_question_slots"] = []
+    prompt = _actor_prompt(
+        {"speaker": "Target"},
+        {"context_turns": []},
+        normalized,
+        {"user_state": {}, "behavior_policy": decision["behavior_policy"]},
+        {},
+    )
+    assert "asks questions" not in prompt
