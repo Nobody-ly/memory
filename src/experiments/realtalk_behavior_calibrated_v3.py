@@ -547,12 +547,16 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
         if rid in checkpoint.data["results"]:
             continue
         item, point = index[rid]; current = point["context_turns"]
-        gate = behavior_calibrator(current, item["speaker"], point["target_session"], item["reference_turns"])
-        stats = _stats(item["reference_turns"], item["speaker"])
-        user_domain = user_domains[item["speaker"]][point["target_session"]]
-        decision = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:decision:{rid}", system_prompt=DECISION_SYSTEM_PROMPT, user_prompt=_decision_prompt(item, point, self_domains[item["speaker"]], user_domain, gate, stats), schema=DECISION_SCHEMA, normalizer=lambda value, allowed=base.evidence_ids(current)|base.evidence_ids(item["reference_turns"]): _normalize_decision(value, allowed, gate), max_tokens=2048, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
-        actor = _actor_call(checkpoint, backend, f"v3:actor:{rid}", item["speaker"], _actor_prompt(item, point, self_domains[item["speaker"]], decision["data"], gate), decision["data"], raw_audit, 2, config.timeout_seconds)
-        checkpoint.store_result(rid, {"result_id": rid, "mode": "cb", "speaker": item["speaker"], "partner": item["partner"], "reference_file": item["reference_file"], "current_file": item["current_file"], "target_session": point["target_session"], "target_turn_id": point["target"]["turn_id"], "source_message_ids": point["target"]["dia_ids"], "history_hash": point["history_hash"], "visible_history_turns": len(current), "user_domain": user_domain, "scene_gate": gate, "self_domain": self_domains[item["speaker"]], "decision": decision["data"], "generated_message": actor["data"], "ground_truth": point["target_message"], "decision_audit": decision["audit"], "actor_audit": actor["audit"]})
+        try:
+            gate = behavior_calibrator(current, item["speaker"], point["target_session"], item["reference_turns"])
+            stats = _stats(item["reference_turns"], item["speaker"])
+            user_domain = user_domains[item["speaker"]][point["target_session"]]
+            decision = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:decision:{rid}", system_prompt=DECISION_SYSTEM_PROMPT, user_prompt=_decision_prompt(item, point, self_domains[item["speaker"]], user_domain, gate, stats), schema=DECISION_SCHEMA, normalizer=lambda value, allowed=base.evidence_ids(current)|base.evidence_ids(item["reference_turns"]): _normalize_decision(value, allowed, gate), max_tokens=2048, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
+            actor = _actor_call(checkpoint, backend, f"v3:actor:{rid}", item["speaker"], _actor_prompt(item, point, self_domains[item["speaker"]], decision["data"], gate), decision["data"], raw_audit, 2, config.timeout_seconds)
+            checkpoint.store_result(rid, {"result_id": rid, "mode": "cb", "speaker": item["speaker"], "partner": item["partner"], "reference_file": item["reference_file"], "current_file": item["current_file"], "target_session": point["target_session"], "target_turn_id": point["target"]["turn_id"], "source_message_ids": point["target"]["dia_ids"], "history_hash": point["history_hash"], "visible_history_turns": len(current), "user_domain": user_domain, "scene_gate": gate, "self_domain": self_domains[item["speaker"]], "decision": decision["data"], "generated_message": actor["data"], "ground_truth": point["target_message"], "decision_audit": decision["audit"], "actor_audit": actor["audit"]})
+        except Exception as exc:
+            checkpoint.store_excluded_result(rid, {"status": "unresolved", "result_id": rid, "speaker": item["speaker"], "target_session": point["target_session"], "error_type": type(exc).__name__, "error": str(exc)[:500], "updated_at_utc": _now()})
+            break
     results = sorted(checkpoint.result_values(), key=lambda r:(r["speaker"].casefold(), r["target_session"], r["target_turn_id"]))
     _write_jsonl(output/"predictions.jsonl", results); _write_json(output/"self_domains.json", self_domains); _write_json(output/"user_domains.json", user_domains)
     unresolved = checkpoint.data.get("failures", {})
