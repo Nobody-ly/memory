@@ -2,7 +2,7 @@
 
 版本：`realtalk_task1_ours_behavior_calibrated_v3`
 
-当前合同修订：`realtalk_task1_ours_behavior_calibrated_v3_1`。V3.1 不改变数据、模型、Schema 或方法流程，只修复两项结构执行问题：User Domain 完全重复事实的确定性合并，以及 Actor 在禁止出站提问时受到问句型 voice 示例干扰。V3.1 从 Gate 6 重新开始，旧 V3 运行全部保留。
+当前合同修订：`realtalk_task1_ours_behavior_calibrated_v3_1_1`。V3.1.1 不改变数据、模型、Schema 或方法流程，只修复三项结构执行问题：User Domain 完全重复事实的确定性合并；Actor 在禁止出站提问时受到问句型 voice 示例干扰；结构重试携带被拒绝草稿和精确修复指令，避免模型在无草稿条件下重复生成同一错误。V3.1.1 从 Gate 6 重新开始，旧 V3/V3.1 运行全部保留。
 
 用途：在 REALTALK Task 1 的相同 Ca/Cb 协议下，重新实现一个可复核的 Ours 版本。V3 使用当前 V2 的代码管线、源数据和评价工具作为工程基础，但重新生成 Self Domain、User Domain、Decision 和回复；不读取 V2 的画像、策略或生成文本。
 

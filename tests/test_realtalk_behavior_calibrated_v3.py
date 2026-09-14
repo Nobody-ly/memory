@@ -9,6 +9,7 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     _normalize_self,
     _normalize_user_v3,
     _actor_retry_instruction,
+    _actor_retry_suffix,
     _scene_for,
     behavior_calibrator,
     _actor_prompt,
@@ -193,6 +194,16 @@ def test_actor_retry_instruction_removes_all_unselected_questions():
     instruction = _actor_retry_instruction("actor added an unselected outbound question")
     assert "Remove every question" in instruction
     assert "history or Self Domain" in instruction
+
+
+def test_actor_retry_suffix_includes_rejected_draft_and_exact_repair():
+    suffix = _actor_retry_suffix(
+        "actor added an unselected outbound question",
+        "Hey man, how's it going?",
+    )
+    assert "REJECTED DRAFT" in suffix
+    assert "Hey man, how's it going?" in suffix
+    assert "Remove every question" in suffix
 
 
 def test_user_domain_merges_only_exact_duplicate_facts():

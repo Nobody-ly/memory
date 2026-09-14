@@ -28,7 +28,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_1"
+PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_1_1"
 MODEL = "deepseek-v4-flash"
 SCENES = (
     "session_opening", "direct_question", "partner_affect",
@@ -484,6 +484,7 @@ def _prompt_hashes() -> dict[str, str]:
         "decision_user_template": inspect.getsource(_decision_prompt),
         "actor_user_template": inspect.getsource(_actor_prompt),
         "actor_retry_contract": inspect.getsource(_actor_retry_instruction),
+        "actor_retry_template": inspect.getsource(_actor_retry_suffix),
     }
     return {name: _hash(value) for name, value in prompts.items()}
 
@@ -519,17 +520,21 @@ def _actor_retry_instruction(error: str) -> str:
     return "Correct only the stated contract violation and keep the same selected policy."
 
 
+def _actor_retry_suffix(error: str, rejected_draft: str) -> str:
+    return (
+        f"\n\nREJECTED DRAFT FROM PREVIOUS ATTEMPT:\n{rejected_draft}\n"
+        f"CONTRACT ERROR: {error}\n"
+        f"REPAIR INSTRUCTION: {_actor_retry_instruction(error)}\n"
+        "Return only the corrected message."
+    )
+
+
 def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker: str, prompt: str, decision: dict[str, Any], raw_audit: Path, max_attempts: int, timeout: int) -> dict[str, Any]:
-    feedback = {"error": ""}
+    feedback = {"error": "", "draft": ""}
     attempts = {"n": 0}
     def operation():
         attempts["n"] += 1
-        suffix = (
-            f"\n\nCONTRACT ERROR FROM PREVIOUS ATTEMPT: {feedback['error']}\n"
-            f"REPAIR INSTRUCTION: {_actor_retry_instruction(feedback['error'])}\n"
-            "Regenerate only the message."
-            if feedback["error"] else ""
-        )
+        suffix = _actor_retry_suffix(feedback["error"], feedback["draft"]) if feedback["error"] else ""
         return backend.chat(ACTOR_SYSTEM_PROMPT.format(speaker=speaker), prompt + suffix, temperature=0.6, top_p=0.9, max_tokens=300, enable_thinking=False)
     def validate(result):
         with raw_audit.open("a", encoding="utf-8") as handle:
@@ -538,6 +543,7 @@ def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker
             message = _normalize_actor(result.content, speaker, decision)
         except Exception as exc:
             feedback["error"] = str(exc)
+            feedback["draft"] = result.content.strip()
             raise
         return {"data": message, "audit": {"model": result.model, "logical_attempts": attempts["n"], "thinking_enabled": False, "response_id": result.response_id, "finish_reason": result.finish_reason}}
     return checkpoint.execute(key, operation, validate, max_attempts)
