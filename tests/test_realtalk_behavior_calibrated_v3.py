@@ -206,6 +206,18 @@ def test_actor_retry_suffix_includes_rejected_draft_and_exact_repair():
     assert "Remove every question" in suffix
 
 
+def test_actor_allows_ordinary_plan_phrase_when_reflection_is_none():
+    decision = valid_decision()
+    message = "I think I'll take my dog for a walk later and then read for a while."
+    assert _normalize_actor(message, "Emi", decision) == message
+
+
+def test_actor_rejects_explicit_reflection_when_reflection_is_none():
+    decision = valid_decision()
+    with pytest.raises(ValueError, match="unsupported reflection"):
+        _normalize_actor("I think about why I keep avoiding difficult conversations because I feel uncertain.", "Emi", decision)
+
+
 def test_user_domain_merges_only_exact_duplicate_facts():
     value = {
         layer: [] for layer in ("core", "regulation", "cognition", "identity", "behavior")
