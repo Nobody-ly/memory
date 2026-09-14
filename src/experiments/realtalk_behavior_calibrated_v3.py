@@ -284,16 +284,17 @@ def _strings(value: Any, path: str, max_items: int = 20, nonempty: bool = False)
 
 def _normalize_self(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
     root = _exact(value, {"identity_facts", "voice_profile", "social_profile", "behavior_by_scene", "uncertainties", "observable_statistics"}, "self_domain")
-    result: dict[str, Any] = {"identity_facts": [], "voice_profile": [], "social_profile": [], "uncertainties": _strings(root["uncertainties"], "uncertainties", 8)}
+    result: dict[str, Any] = {"identity_facts": [], "voice_profile": [], "social_profile": [], "uncertainties": _strings(root["uncertainties"], "uncertainties", 4)}
+    section_limits = {"identity_facts": 6, "voice_profile": 4, "social_profile": 4}
     for section in ("identity_facts", "voice_profile", "social_profile"):
-        if not isinstance(root[section], list) or len(root[section]) > 12:
-            raise ValueError(f"{section} must be a bounded list")
+        if not isinstance(root[section], list) or len(root[section]) > section_limits[section]:
+            raise ValueError(f"{section} must be a compact list of at most {section_limits[section]} items")
         for i, raw in enumerate(root[section]):
             item = _exact(raw, {"value", "evidence_ids", "confidence"}, f"{section}[{i}]")
-            ids = _strings(item["evidence_ids"], f"{section}[{i}].evidence_ids", 8, True)
+            ids = _strings(item["evidence_ids"], f"{section}[{i}].evidence_ids", 4, True)
             if set(ids) - allowed_ids:
                 raise ValueError(f"{section}[{i}] cites invisible evidence")
-            result[section].append({"value": _text(item["value"], f"{section}[{i}].value", 240), "evidence_ids": ids, "confidence": _float(item["confidence"], f"{section}[{i}].confidence")})
+            result[section].append({"value": _text(item["value"], f"{section}[{i}].value", 160), "evidence_ids": ids, "confidence": _float(item["confidence"], f"{section}[{i}].confidence")})
     scenes = _exact(root["behavior_by_scene"], set(SCENES), "behavior_by_scene")
     result["behavior_by_scene"] = {}
     for scene_name in SCENES:
@@ -304,7 +305,7 @@ def _normalize_self(value: Any, allowed_ids: set[str]) -> dict[str, Any]:
         item = _exact(raw, {"evidence_ids", "sample_count", "usual_action", "question_tendency", "reflection_tendency", "disclosure_tendency", "length_tendency", "confidence"}, scene_name)
         if not isinstance(item["sample_count"], int) or not 1 <= item["sample_count"] <= 200:
             raise ValueError(f"{scene_name}.sample_count invalid")
-        ids = _strings(item["evidence_ids"], f"{scene_name}.evidence_ids", 8, True)
+        ids = _strings(item["evidence_ids"], f"{scene_name}.evidence_ids", 4, True)
         if set(ids) - allowed_ids:
             raise ValueError(f"{scene_name} cites invisible evidence")
         result["behavior_by_scene"][scene_name] = {"evidence_ids": ids, "sample_count": item["sample_count"], "usual_action": _enum(item["usual_action"], USUAL_ACTIONS, f"{scene_name}.usual_action"), "question_tendency": _enum(item["question_tendency"], ("low", "medium", "high", "unknown"), f"{scene_name}.question_tendency"), "reflection_tendency": _enum(item["reflection_tendency"], ("low", "medium", "high", "unknown"), f"{scene_name}.reflection_tendency"), "disclosure_tendency": _enum(item["disclosure_tendency"], ("low", "medium", "high", "unknown"), f"{scene_name}.disclosure_tendency"), "length_tendency": _enum(item["length_tendency"], ("short", "typical", "long", "unknown"), f"{scene_name}.length_tendency"), "confidence": _float(item["confidence"], f"{scene_name}.confidence")}
@@ -441,7 +442,7 @@ def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker
 
 def _domain_prompt(item: dict[str, Any], stats: dict[str, Any]) -> str:
     ids = sorted(base.evidence_ids(item["reference_turns"], item["speaker"]))
-    return f"TARGET SPEAKER: {item['speaker']}\nCOMPLETE Ca HISTORY:\n{base.format_evidence_turns(item['reference_turns'])}\n\nDETERMINISTIC OBSERVABLE STATISTICS:\n{_json(stats)}\n\nALLOWED TARGET EVIDENCE IDS:\n{_json(ids)}"
+    return f"TARGET SPEAKER: {item['speaker']}\nCOMPLETE Ca HISTORY:\n{base.format_evidence_turns(item['reference_turns'])}\n\nDETERMINISTIC OBSERVABLE STATISTICS:\n{_json(stats)}\n\nALLOWED TARGET EVIDENCE IDS:\n{_json(ids)}\n\nCOMPACT OUTPUT BUDGET: return at most 6 identity facts, 4 voice facts, 4 social facts, 4 uncertainties, and at most 4 evidence IDs per scene. Keep each value short and evidence-grounded. Empty unsupported scenes are preferred to verbose speculation."
 
 
 def _user_prompt(speaker: str, partner: str, previous: dict[str, Any], completed: list[dict[str, Any]], allowed: set[str]) -> str:

@@ -225,6 +225,10 @@ reply. Do not invent quotations. Return only the requested strict JSON object.
 
 Self Domain完成后，确定性校验必须检查：七个scene键齐全；`sample_count`与证据数量不超过实际；每个非空scene至少有证据；scene描述与输入伙伴动作满足基本规则；没有一个scene占全部条件但文本明确谈到其他scene的情况。语义检查失败时只重试Self Domain并携带具体错误，不进入Cb。
 
+### 4096-token紧凑输出预算
+
+为保持 Self Domain 的固定 `max_tokens=4096`，结构化输出采用紧凑预算：最多6条identity、4条voice、4条social、4条uncertainties；每个scene最多4个证据ID，事实值保持短文本。没有充分证据的scene必须返回空对象。这个预算只限制画像JSON的冗余，不删除输入历史，也不改变七个scene键和证据约束。
+
 ## 四、User Domain：保留五层，不扩大职责
 
 User Domain每个已完成Session更新一次，结构仍为：

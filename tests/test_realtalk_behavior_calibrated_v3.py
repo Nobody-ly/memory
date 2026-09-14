@@ -5,6 +5,7 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     SCENES,
     SELF_DOMAIN_SCHEMA,
     _normalize_decision,
+    _normalize_self,
     _scene_for,
     behavior_calibrator,
     _actor_prompt,
@@ -80,3 +81,17 @@ def test_user_prompt_separates_partner_and_target_evidence():
     prompt = _user_prompt("Target", "Partner", {}, turns, {"p1"})
     assert "p1" in prompt and "t1" in prompt
     assert "FORBIDDEN TARGET-SPEAKER EVIDENCE IDS" in prompt
+
+
+def test_self_domain_compact_budget_is_enforced():
+    value = {
+        "identity_facts": [],
+        "voice_profile": [],
+        "social_profile": [],
+        "behavior_by_scene": {scene: {} for scene in SCENES},
+        "uncertainties": [],
+        "observable_statistics": {},
+    }
+    value["identity_facts"] = [{"value": "x", "evidence_ids": ["e1"], "confidence": 0.5}] * 7
+    with pytest.raises(ValueError, match="compact list"):
+        _normalize_self(value, {"e1"})
