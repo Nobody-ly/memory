@@ -8,6 +8,7 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     _normalize_actor,
     _normalize_self,
     _normalize_user_v3,
+    _actor_retry_instruction,
     _scene_for,
     behavior_calibrator,
     _actor_prompt,
@@ -164,6 +165,34 @@ def test_actor_view_filters_turn_behavior_from_voice_profile():
         {},
     )
     assert "asks questions" not in prompt
+
+
+def test_actor_view_filters_greeting_question_example_when_question_is_forbidden():
+    value = {
+        "identity_facts": [],
+        "voice_profile": [{"value": "uses casual greetings like 'Hey!' and 'How are you?'", "evidence_ids": ["e1"], "confidence": 0.9}],
+        "social_profile": [],
+        "behavior_by_scene": {scene: {} for scene in SCENES},
+        "uncertainties": [],
+        "observable_statistics": {},
+    }
+    normalized = _normalize_self(value, {"e1"})
+    decision = valid_decision()
+    decision["behavior_policy"]["selected_question_slots"] = []
+    prompt = _actor_prompt(
+        {"speaker": "Target"},
+        {"context_turns": []},
+        normalized,
+        {"user_state": {}, "behavior_policy": decision["behavior_policy"]},
+        {},
+    )
+    assert "How are you?" not in prompt
+
+
+def test_actor_retry_instruction_removes_all_unselected_questions():
+    instruction = _actor_retry_instruction("actor added an unselected outbound question")
+    assert "Remove every question" in instruction
+    assert "history or Self Domain" in instruction
 
 
 def test_user_domain_merges_only_exact_duplicate_facts():

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -27,7 +28,7 @@ from .realtalk_evidence_schemas import (
 from .realtalk_ours import _backend_from_env, _structured_call
 
 
-PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3"
+PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_1"
 MODEL = "deepseek-v4-flash"
 SCENES = (
     "session_opening", "direct_question", "partner_affect",
@@ -473,7 +474,18 @@ def _stats(turns: list[dict[str, Any]], speaker: str) -> dict[str, Any]:
 
 
 def _prompt_hashes() -> dict[str, str]:
-    return {name: _hash(value) for name, value in {"self_system": SELF_SYSTEM_PROMPT, "user_system": USER_SYSTEM_PROMPT, "decision_system": DECISION_SYSTEM_PROMPT, "actor_system": ACTOR_SYSTEM_PROMPT}.items()}
+    prompts = {
+        "self_system": SELF_SYSTEM_PROMPT,
+        "user_system": USER_SYSTEM_PROMPT,
+        "decision_system": DECISION_SYSTEM_PROMPT,
+        "actor_system": ACTOR_SYSTEM_PROMPT,
+        "self_user_template": inspect.getsource(_domain_prompt),
+        "user_user_template": inspect.getsource(_user_prompt),
+        "decision_user_template": inspect.getsource(_decision_prompt),
+        "actor_user_template": inspect.getsource(_actor_prompt),
+        "actor_retry_contract": inspect.getsource(_actor_retry_instruction),
+    }
+    return {name: _hash(value) for name, value in prompts.items()}
 
 
 def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
@@ -496,12 +508,28 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     return message
 
 
+def _actor_retry_instruction(error: str) -> str:
+    if "unselected outbound question" in error:
+        return (
+            "Remove every question and every question mark. Do not copy or paraphrase an "
+            "interrogative from the history or Self Domain. Keep only the selected non-question content."
+        )
+    if "requires at least one question" in error:
+        return "Add the selected outbound question about its exact focus; do not add another topic."
+    return "Correct only the stated contract violation and keep the same selected policy."
+
+
 def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker: str, prompt: str, decision: dict[str, Any], raw_audit: Path, max_attempts: int, timeout: int) -> dict[str, Any]:
     feedback = {"error": ""}
     attempts = {"n": 0}
     def operation():
         attempts["n"] += 1
-        suffix = f"\n\nCONTRACT ERROR FROM PREVIOUS ATTEMPT: {feedback['error']}\nRegenerate only the message and follow the same policy." if feedback["error"] else ""
+        suffix = (
+            f"\n\nCONTRACT ERROR FROM PREVIOUS ATTEMPT: {feedback['error']}\n"
+            f"REPAIR INSTRUCTION: {_actor_retry_instruction(feedback['error'])}\n"
+            "Regenerate only the message."
+            if feedback["error"] else ""
+        )
         return backend.chat(ACTOR_SYSTEM_PROMPT.format(speaker=speaker), prompt + suffix, temperature=0.6, top_p=0.9, max_tokens=300, enable_thinking=False)
     def validate(result):
         with raw_audit.open("a", encoding="utf-8") as handle:
@@ -532,15 +560,16 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
     policy = decision["behavior_policy"]
-    turn_behavior_pattern = r"\b(ask|asks|question|questions|answer|answers|respond|responds|reply|replies|follow.?up|reflect|reflects|self.?disclos|support|supports|comfort|comforts|greet|greets)\b"
+    outbound_question_allowed = policy["outbound_question_mode"] != "none"
+    turn_behavior_pattern = r"\b(ask|asks|question|questions|answer|answers|respond|responds|reply|replies|follow.?up|reflect|reflects|self.?disclos|support|supports|comfort|comforts|greet|greets|greeting|greetings|check.?in|check.?ins)\b"
     actor_self_view = {
         "identity_facts": self_domain["identity_facts"],
         "voice_profile": [
             fact for fact in self_domain["voice_profile"]
             if not _words(fact["value"], turn_behavior_pattern)
+            and (outbound_question_allowed or "?" not in fact["value"] and "？" not in fact["value"])
         ],
     }
-    outbound_question_allowed = policy["outbound_question_mode"] != "none"
     question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound question mode: {policy['outbound_question_mode']}. Outbound question focus: {policy['outbound_question_focus'] or 'none'}. "
     question_contract += (
         "You must include at least one natural question about the selected focus before ending; every question must serve the selected mode and focus."
