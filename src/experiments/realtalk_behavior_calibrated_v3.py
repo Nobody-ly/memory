@@ -413,9 +413,13 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
         raise ValueError("actor leaked speaker label")
     if message.startswith(("{", "[")) or re.search(r'"(?:behavior_policy|user_state|self_domain|lambda_trace)"\s*:', message, re.I):
         raise ValueError("actor leaked private structure")
-    slots = decision["behavior_policy"]["selected_question_slots"]
-    if not slots and ("?" in message or "？" in message):
-        raise ValueError("actor added an unselected question")
+    policy = decision["behavior_policy"]
+    question_count = message.count("?") + message.count("？")
+    outbound_question_allowed = policy["grounding_mode"] == "clarifying_question"
+    if not outbound_question_allowed and question_count:
+        raise ValueError("actor added an unselected outbound question")
+    if outbound_question_allowed and question_count != 1:
+        raise ValueError("clarifying_question requires exactly one outbound question")
     if decision["behavior_policy"]["reflection_mode"] == "none" and _words(message, r"\b(i think|i feel|i guess|in my opinion|because)\b") and len(message) > 70:
         raise ValueError("actor added unsupported reflection")
     return message
@@ -457,10 +461,12 @@ def _decision_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: d
 
 def _actor_prompt(item: dict[str, Any], point: dict[str, Any], self_domain: dict[str, Any], decision: dict[str, Any], gate: dict[str, Any]) -> str:
     policy = decision["behavior_policy"]
-    question_contract = (
-        f"Selected question slots: {len(policy['selected_question_slots'])}. "
-        "If this is 0, the message MUST contain no question mark and no question. "
-        "If this is greater than 0, ask only the selected slots; do not invent another question."
+    outbound_question_allowed = policy["grounding_mode"] == "clarifying_question"
+    question_contract = f"Selected partner-question slots to ANSWER: {len(policy['selected_question_slots'])}. Answer those slots; they never authorize a new question. Outbound clarifying question allowed: {str(outbound_question_allowed).lower()}. "
+    question_contract += (
+        "Ask exactly one concrete clarification and no other question."
+        if outbound_question_allowed
+        else "The message MUST contain no question mark and must not ask any question."
     )
     return f"CURRENT REAL HISTORY BEFORE TARGET:\n{base.format_evidence_turns(point['context_turns'])}\n\nPRIVATE SELF DOMAIN:\n{_json(self_domain)}\n\nCURRENT USER STATE:\n{_json(decision['user_state'])}\n\nSELECTED BEHAVIOR POLICY:\n{_json(policy)}\n\nCURRENT SCENE GATE:\n{_json(gate)}\n\nHARD MESSAGE CONTRACT:\nExecute the selected primary action and required content only. {question_contract} Do not add a greeting question, follow-up question, reflection, self-disclosure, or topic that is not selected.\n\nWrite only {item['speaker']}'s next message."
 

@@ -5,6 +5,7 @@ from src.experiments.realtalk_behavior_calibrated_v3 import (
     SCENES,
     SELF_DOMAIN_SCHEMA,
     _normalize_decision,
+    _normalize_actor,
     _normalize_self,
     _scene_for,
     behavior_calibrator,
@@ -71,6 +72,20 @@ def test_actor_prompt_makes_zero_question_contract_explicit():
     )
     assert "MUST contain no question mark" in prompt
     assert "Do not add a greeting question" in prompt
+
+
+def test_partner_question_slots_do_not_authorize_outbound_question():
+    decision = valid_decision()
+    with pytest.raises(ValueError, match="outbound question"):
+        _normalize_actor("Sure, I can do that. Anything else?", "Emi", decision)
+
+
+def test_clarifying_question_requires_exactly_one_outbound_question():
+    decision = valid_decision()
+    decision["behavior_policy"]["grounding_mode"] = "clarifying_question"
+    assert _normalize_actor("Which day do you mean?", "Emi", decision) == "Which day do you mean?"
+    with pytest.raises(ValueError, match="exactly one"):
+        _normalize_actor("I am not sure.", "Emi", decision)
 
 
 def test_user_prompt_separates_partner_and_target_evidence():
