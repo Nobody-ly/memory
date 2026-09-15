@@ -720,7 +720,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
             if not any(int(s.split("_")[1]) >= int(next_session.split("_")[1]) for s in needed):
                 continue
             completed = by_session[f"session_{previous_index}"]; allowed_partner |= base.evidence_ids(completed, item["partner"])
-            user_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:user:{base._safe_id(speaker)}:after:{previous_index}", system_prompt=USER_SYSTEM_PROMPT, user_prompt=_user_prompt(speaker, item["partner"], domain, completed, allowed_partner), schema=USER_DOMAIN_SCHEMA, normalizer=lambda value, allowed=set(allowed_partner): _normalize_user_v3(value, allowed), max_tokens=4096, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
+            user_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:user:{base._safe_id(speaker)}:after:{previous_index}", system_prompt=USER_SYSTEM_PROMPT, user_prompt=_user_prompt(speaker, item["partner"], domain, completed, allowed_partner), schema=USER_DOMAIN_SCHEMA, normalizer=lambda value, allowed=set(allowed_partner): _normalize_user_v3(value, allowed), max_tokens=8192, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
             domain = user_result["data"]; user_domains[speaker][next_session] = domain
     for rid in selected_ids:
         if rid in checkpoint.data["results"]:
