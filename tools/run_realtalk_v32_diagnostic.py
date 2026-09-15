@@ -72,7 +72,7 @@ def build_selection(dataset):
         "selection_scope": "retrospective Vanessa contiguous difficulty diagnostic, not independent test"}
 
 
-def evaluate(predictions, output, original, dataset, *, local=False):
+def evaluate(predictions, output, original, dataset, *, local=False, scope="Retrospective Vanessa diagnostic"):
     rows = read_rows(predictions)
     baseline = []
     candidate = []
@@ -111,7 +111,7 @@ def evaluate(predictions, output, original, dataset, *, local=False):
             comparison[k] = {"v9": statistics.mean(r["local_metrics"][k] for r in old_local),
                              "candidate": statistics.mean(r["local_metrics"][k] for r in new_local)}
     write(output / "paired_all_available.json", comparison)
-    lines = ["# V3.2 vs canonical V9", "", f"Retrospective Vanessa diagnostic: {len(rows)} records. Not a paper main result.", "",
+    lines = ["# V3.2.1 vs canonical V9", "", f"{scope}: {len(rows)} records. Not a paper main result.", "",
              "| Metric | V9 | V3.2 | New minus old |", "|---|---:|---:|---:|"]
     for k, value in comparison.items():
         lines.append(f"| {k} | {value['v9']:.6f} | {value['candidate']:.6f} | {value['candidate'] - value['v9']:+.6f} |")
