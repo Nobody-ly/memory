@@ -715,7 +715,9 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
             (output/name).unlink(missing_ok=True)
     backend = backend or _backend_from_env(MODEL)
     if hasattr(backend, "client"):
-        backend.client = backend.client.with_options(max_retries=0)
+        # Do not clone: older SDK wrappers close the shared HTTP transport when
+        # the replaced client is garbage-collected.
+        backend.client.max_retries = 0
         backend.max_attempts = 3
     if backend.model != MODEL:
         raise ValueError(f"backend model mismatch: {backend.model}")
