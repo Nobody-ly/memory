@@ -13,6 +13,7 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -25,11 +26,16 @@ from .realtalk_evidence_schemas import (
     normalize_user_domain,
     validate_evidence_ids,
 )
-from .realtalk_ours import _backend_from_env, _structured_call
+from .realtalk_ours import _backend_from_env, _structured_call as _base_structured_call
+from .realtalk_ours import _call_with_hard_timeout
 
 
-PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_1_1"
+PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_2_contract_reliability"
 MODEL = "deepseek-v4-flash"
+_structured_call = partial(_base_structured_call, validate_schema=True, repair_raw_chars=1000000)
+DECODING = {"self": 4096, "user": 8192, "decision": 2048, "actor": 300,
+            "structured_attempts": 3, "actor_attempts": 3, "actor_repair_temperature": 0.0,
+            "network_attempts_per_call": 3, "sdk_retries": 0}
 SCENES = (
     "session_opening", "direct_question", "partner_affect",
     "partner_disclosure", "opinion_or_advice", "conversation_closure",
@@ -51,7 +57,7 @@ def _schema_properties() -> dict[str, Any]:
     fact = {
         "type": "object",
         "properties": {
-            "value": {"type": "string", "maxLength": 240},
+            "value": {"type": "string", "maxLength": 160},
             "evidence_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
@@ -78,11 +84,11 @@ def _schema_properties() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "identity_facts": {"type": "array", "items": fact, "maxItems": 12},
-            "voice_profile": {"type": "array", "items": fact, "maxItems": 8},
-            "social_profile": {"type": "array", "items": fact, "maxItems": 8},
+            "identity_facts": {"type": "array", "items": fact, "maxItems": 6},
+            "voice_profile": {"type": "array", "items": fact, "maxItems": 4},
+            "social_profile": {"type": "array", "items": fact, "maxItems": 4},
             "behavior_by_scene": {"type": "object", "properties": {s: scene_or_empty for s in SCENES}, "required": list(SCENES), "additionalProperties": False},
-            "uncertainties": {"type": "array", "items": {"type": "string", "maxLength": 240}, "maxItems": 8},
+            "uncertainties": {"type": "array", "items": {"type": "string", "maxLength": 240}, "maxItems": 4},
             "observable_statistics": {"type": "object", "additionalProperties": True},
         },
         "required": ["identity_facts", "voice_profile", "social_profile", "behavior_by_scene", "uncertainties", "observable_statistics"],
@@ -128,10 +134,10 @@ DECISION_SCHEMA = {
                 "grounding_mode": {"type": "string", "enum": ["none", "specific_acknowledgment", "clarifying_question"]},
                 "empathy_mode": {"type": "string", "enum": ["none", "light", "moderate"]},
                 "intimacy_mode": {"type": "string", "enum": ["match", "slightly_warm", "reserved"]},
-                "message_shape": {"type": "string", "enum": ["single_short", "single_typical", "multi_content"]},
+                "message_length": {"type": "string", "enum": ["short", "typical"]},
                 "required_content_slots": {"type": "array", "items": {"type": "string", "maxLength": 240}, "minItems": 1, "maxItems": 4},
                 "forbidden_additions": {"type": "array", "items": {"type": "string", "maxLength": 80}, "maxItems": 6},
-            }, "required": ["primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"], "additionalProperties": False},
+            }, "required": ["primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_length", "required_content_slots", "forbidden_additions"], "additionalProperties": False},
             "evidence_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
         },
         "required": ["situation", "user_state", "relevant_user_domain", "alignment", "behavior_policy", "evidence_ids"],
@@ -194,8 +200,13 @@ adaptation. The orientation and affected dimensions must match the one concrete 
 
 Use one policy object only. Never place a behavior in both a selected field and a forbidden field. grounding_mode
 may be clarifying_question only when outbound_question_mode is clarifying. If reflection_mode is none, do not require reflection.
-Moderate empathy requires an explicit affective partner signal. Multi-content requires at least two actual content
-slots. Return only strict JSON and do not draft the final message."""
+Moderate empathy requires an explicit affective partner signal. required_content_slots is a variable-length array
+of 1 to 4 nonempty content intentions, not a fixed number of bubbles. Decide the intentions once; do not emit
+message_shape. The pipeline derives composition from this array. message_length only chooses short or typical.
+If outbound_question_mode is none, outbound_question_focus must be empty. Otherwise it must name the question
+topic. grounding_mode is clarifying_question if and only if outbound_question_mode is clarifying.
+Answering the partner's selected_question_slots never authorizes a new question.
+Return only strict JSON and do not draft the final message."""
 
 
 ACTOR_SYSTEM_PROMPT = """You are {speaker}. Continue the conversation as this person.
@@ -383,7 +394,7 @@ def _normalize_decision(value: Any, allowed_ids: set[str], context: dict[str, An
     situation = _exact(root["situation"], {"scene", "partner_act", "topic", "uncertainty"}, "situation")
     state = _exact(root["user_state"], {"interaction_need", "affect", "affect_confidence", "topic_continuity", "response_pressure"}, "user_state")
     alignment = _exact(root["alignment"], {"orientation", "lambda_trace", "basis", "affected_dimensions"}, "alignment")
-    policy = _exact(root["behavior_policy"], {"primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_shape", "required_content_slots", "forbidden_additions"}, "behavior_policy")
+    policy = _exact(root["behavior_policy"], {"primary_action", "selected_question_slots", "outbound_question_mode", "outbound_question_focus", "reflection_mode", "self_disclosure_mode", "grounding_mode", "empathy_mode", "intimacy_mode", "message_length", "required_content_slots", "forbidden_additions"}, "behavior_policy")
     scene = _enum(situation["scene"], list(SCENES) + ["unclear"], "situation.scene")
     slots = _strings(policy["selected_question_slots"], "selected_question_slots", 4)
     if any(slot not in QUESTION_SLOTS for slot in slots) or len(set(slots)) != len(slots):
@@ -408,9 +419,10 @@ def _normalize_decision(value: Any, allowed_ids: set[str], context: dict[str, An
     required_slots = _strings(policy["required_content_slots"], "required_content_slots", 4, True)
     if reflection == "none" and any("reflect" in x.casefold() for x in required_slots):
         raise ValueError("reflection is required while reflection_mode is none")
-    message_shape = _enum(policy["message_shape"], ("single_short", "single_typical", "multi_content"), "message_shape")
-    if message_shape == "multi_content" and len(required_slots) < 2:
-        raise ValueError("multi_content needs at least two content slots")
+    if not required_slots:
+        raise ValueError("required_content_slots needs 1 to 4 nonempty intentions")
+    message_length = _enum(policy["message_length"], ("short", "typical"), "message_length")
+    message_shape = "multi_content" if len(required_slots) > 1 else f"single_{message_length}"
     if policy["empathy_mode"] == "moderate" and scene not in {"partner_affect"}:
         raise ValueError("moderate empathy requires partner_affect")
     evidence = _strings(root["evidence_ids"], "evidence_ids", 8)
@@ -506,10 +518,7 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
         raise ValueError("actor added an unselected outbound question")
     if outbound_question_allowed and question_count < 1:
         raise ValueError(f"selected outbound question requires at least one question about {policy['outbound_question_focus']!r}")
-    reflection_markers = r"\b(i feel|i guess|in my opinion|because)\b|\b(i think)\s+(that|this|it|because|about|why|how)\b"
-    # Natural short self-reflection is allowed even when the controller did not
-    # request an explicit reflection slot; it is part of the target's observed
-    # conversational behavior and should be judged rather than discarded.
+    # Lexical reflection markers are not a reliable semantic rejection rule.
     return message
 
 
@@ -539,11 +548,18 @@ def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker
     def operation():
         attempts["n"] += 1
         suffix = _actor_retry_suffix(feedback["error"], feedback["draft"]) if feedback["error"] else ""
-        return backend.chat(ACTOR_SYSTEM_PROMPT.format(speaker=speaker), prompt + suffix, temperature=0.6, top_p=0.9, max_tokens=300, enable_thinking=False)
+        system = ACTOR_SYSTEM_PROMPT.format(speaker=speaker)
+        if feedback["error"]:
+            system += "\nThis is a contract repair, not a new continuation. " + _actor_retry_instruction(feedback["error"])
+        return _call_with_hard_timeout(lambda: backend.chat(system, prompt + suffix,
+            temperature=0.0 if feedback["error"] else 0.6, top_p=0.9,
+            max_tokens=DECODING["actor"], enable_thinking=False), timeout, key)
     def validate(result):
         with raw_audit.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"operation_key": key, "logical_attempt": attempts["n"], "model": result.model, "raw_response": result.content, "reasoning_content": result.reasoning_content, "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens, "response_id": result.response_id, "finish_reason": result.finish_reason, "recorded_at_utc": _now()}, ensure_ascii=False) + "\n")
         try:
+            if result.finish_reason == "length":
+                raise ValueError("actor output was truncated; finish the same plan within the output budget")
             message = _normalize_actor(result.content, speaker, decision)
         except Exception as exc:
             feedback["error"] = str(exc)
@@ -595,6 +611,11 @@ def _file_sha256(path: Path) -> str:
 
 def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int, parent_output: Path | None = None, selected_ids_file: str | None = None) -> dict[str, Any]:
     manifest = {"protocol": PROTOCOL, "mode": "cb", "gate": gate, "model": MODEL, "thinking_enabled_all_stages": False, "dataset": dataset_manifest, "selected_ids_sha256": _hash(selected_ids), "selected_ids_source": selected_ids_file, "prompt_hashes": _prompt_hashes(), "schema_hashes": {"self": _hash(SELF_DOMAIN_SCHEMA), "user": _hash(USER_DOMAIN_SCHEMA), "decision": _hash(DECISION_SCHEMA)}, "history_compression_enabled": False, "history_truncation_enabled": False, "generated_outputs_rolled_into_history": False, "omega_enabled": False, "future_user_state_enabled": False, "semantic_verification_or_candidate_search": False, "v2_outputs_read": False, "judge_labels_read": False, "ground_truth_read_by_generation": False}
+    manifest["decoding"] = DECODING
+    manifest["implementation_hashes"] = {name: _file_sha256(Path(__file__).with_name(name)) for name in
+        ("realtalk_behavior_calibrated_v3.py", "realtalk_ours.py", "realtalk_evidence_schemas.py", "operation_checkpoint.py", "realtalk_evidence_conditioned.py", "exp1_protocol.py")}
+    manifest["implementation_hashes"]["client.py"] = _file_sha256(Path(__file__).parent / "personaemp/client.py")
+    manifest["diagnostic_only"] = bool(selected_ids_file)
     if parent_output is not None:
         manifest["parent_output"] = str(parent_output)
         manifest["parent_manifest_sha256"] = _file_sha256(parent_output / "manifest.json")
@@ -607,6 +628,10 @@ def _seed_parent_checkpoint(checkpoint: OperationCheckpoint, parent_output: Path
     if not parent_manifest_path.exists() or not parent_checkpoint_path.exists():
         raise ValueError("parent output must contain manifest.json and checkpoint.json")
     parent_manifest = json.loads(parent_manifest_path.read_text(encoding="utf-8"))
+    current = _manifest(parent_manifest["dataset"], [], 0)
+    for field in ("prompt_hashes", "schema_hashes", "implementation_hashes", "decoding"):
+        if parent_manifest.get(field) != current.get(field):
+            raise ValueError(f"parent {field} mismatch; do not mix different implementations")
     if parent_manifest.get("protocol") != PROTOCOL or parent_manifest.get("status") != "generation_complete":
         raise ValueError("parent output is not a complete run of the same V3.1.1 protocol")
     if parent_manifest.get("unresolved_count", 1) != 0:
@@ -674,7 +699,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
     selected_ids = list(gates[str(config.gate)])
     if config.selected_ids_file:
         requested = json.loads(Path(config.selected_ids_file).read_text(encoding="utf-8"))
-        if not isinstance(requested, list) or not requested or len(requested) != len(set(requested)):
+        if not isinstance(requested, list) or not requested or not all(isinstance(rid, str) for rid in requested) or len(requested) != len(set(requested)):
             raise ValueError("selected_ids_file must contain a non-empty list of unique result_id strings")
         available = {point["result_id"] for item in prepared for point in item["points"]}
         missing = [rid for rid in requested if rid not in available]
@@ -689,11 +714,16 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
         for name in ("checkpoint.json", "raw_responses.jsonl", "predictions.jsonl", "self_domains.json", "user_domains.json", "manifest.json", "unresolved_errors.jsonl", "GENERATION_COMPLETE"):
             (output/name).unlink(missing_ok=True)
     backend = backend or _backend_from_env(MODEL)
+    if hasattr(backend, "client"):
+        backend.client = backend.client.with_options(max_retries=0)
+        backend.max_attempts = 3
     if backend.model != MODEL:
         raise ValueError(f"backend model mismatch: {backend.model}")
     manifest = _manifest(dataset_manifest, selected_ids, config.gate, parent_output, config.selected_ids_file)
     signature = _hash({"manifest": manifest, "config": {k:v for k,v in asdict(config).items() if k not in {"output_dir", "fresh", "resume", "gate"}}})
     checkpoint = OperationCheckpoint(output/"checkpoint.json", signature)
+    _write_json(output/"manifest.json", {**manifest, "status": "running", "implementation_signature": signature})
+    _write_json(output/"selected_ids.json", selected_ids)
     if config.preflight_only:
         _write_json(output/"manifest.json", {**manifest, "status": "preflight_complete", "implementation_signature": signature})
         return {"status": "preflight_complete", "records": 0, "output_dir": str(output)}
@@ -710,6 +740,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
         stats = _stats(item["reference_turns"], speaker)
         self_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:self:{base._safe_id(speaker)}", system_prompt=SELF_SYSTEM_PROMPT, user_prompt=_domain_prompt(item, stats), schema=SELF_DOMAIN_SCHEMA, normalizer=lambda value, allowed=allowed_self: _normalize_self(value, allowed), max_tokens=4096, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
         self_domains[speaker] = self_result["data"]
+        _write_json(output/"self_domains.json", self_domains)
         by_session = {s:[t for t in item["current_turns"] if t["session_id"]==s] for s in ("session_1", "session_2", "session_3")}
         existing_domains = user_domains.get(speaker, {})
         domain = existing_domains.get("session_1", empty_user_domain())
@@ -722,6 +753,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
             completed = by_session[f"session_{previous_index}"]; allowed_partner |= base.evidence_ids(completed, item["partner"])
             user_result = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:user:{base._safe_id(speaker)}:after:{previous_index}", system_prompt=USER_SYSTEM_PROMPT, user_prompt=_user_prompt(speaker, item["partner"], domain, completed, allowed_partner), schema=USER_DOMAIN_SCHEMA, normalizer=lambda value, allowed=set(allowed_partner): _normalize_user_v3(value, allowed), max_tokens=8192, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
             domain = user_result["data"]; user_domains[speaker][next_session] = domain
+            _write_json(output/"user_domains.json", user_domains)
     for rid in selected_ids:
         if rid in checkpoint.data["results"]:
             continue
@@ -731,14 +763,18 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
             stats = _stats(item["reference_turns"], item["speaker"])
             user_domain = user_domains[item["speaker"]][point["target_session"]]
             decision = _structured_call(checkpoint=checkpoint, backend=backend, operation_key=f"v3:decision:{rid}", system_prompt=DECISION_SYSTEM_PROMPT, user_prompt=_decision_prompt(item, point, self_domains[item["speaker"]], user_domain, gate, stats), schema=DECISION_SCHEMA, normalizer=lambda value, allowed=base.evidence_ids(current)|base.evidence_ids(item["reference_turns"]): _normalize_decision(value, allowed, gate), max_tokens=2048, max_attempts=config.operation_max_attempts, raw_audit=raw_audit, enable_thinking=False, hard_timeout_seconds=config.timeout_seconds)
-            actor = _actor_call(checkpoint, backend, f"v3:actor:{rid}", item["speaker"], _actor_prompt(item, point, self_domains[item["speaker"]], decision["data"], gate), decision["data"], raw_audit, 2, config.timeout_seconds)
+            actor = _actor_call(checkpoint, backend, f"v3:actor:{rid}", item["speaker"], _actor_prompt(item, point, self_domains[item["speaker"]], decision["data"], gate), decision["data"], raw_audit, DECODING["actor_attempts"], config.timeout_seconds)
             checkpoint.store_result(rid, {"result_id": rid, "mode": "cb", "speaker": item["speaker"], "partner": item["partner"], "reference_file": item["reference_file"], "current_file": item["current_file"], "target_session": point["target_session"], "target_turn_id": point["target"]["turn_id"], "source_message_ids": point["target"]["dia_ids"], "history_hash": point["history_hash"], "visible_history_turns": len(current), "user_domain": user_domain, "scene_gate": gate, "self_domain": self_domains[item["speaker"]], "decision": decision["data"], "generated_message": actor["data"], "ground_truth": point["target_message"], "decision_audit": decision["audit"], "actor_audit": actor["audit"]})
         except Exception as exc:
             checkpoint.store_excluded_result(rid, {"status": "unresolved", "result_id": rid, "speaker": item["speaker"], "target_session": point["target_session"], "error_type": type(exc).__name__, "error": str(exc)[:500], "updated_at_utc": _now()})
             break
+        checkpoint.data["failures"].pop(f"sample:{rid}", None)
+        checkpoint.save()
+        _write_jsonl(output/"predictions.jsonl", checkpoint.result_values())
     results = sorted(checkpoint.result_values(), key=lambda r:(r["speaker"].casefold(), r["target_session"], r["target_turn_id"]))
     _write_jsonl(output/"predictions.jsonl", results); _write_json(output/"self_domains.json", self_domains); _write_json(output/"user_domains.json", user_domains)
     unresolved = checkpoint.data.get("failures", {})
+    _write_jsonl(output/"unresolved_errors.jsonl", [{"key": key, **value} for key, value in unresolved.items()])
     _write_json(output/"manifest.json", {**manifest, "status": "generation_complete" if len(results)==len(selected_ids) and not unresolved else "incomplete", "implementation_signature": signature, "completed_records": len(results), "unresolved_count": len(unresolved)})
     if len(results)==len(selected_ids) and not unresolved:
         (output/"GENERATION_COMPLETE").write_text(_now()+"\n", encoding="utf-8")

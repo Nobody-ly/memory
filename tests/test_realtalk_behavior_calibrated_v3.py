@@ -38,16 +38,18 @@ def valid_decision():
         "user_state": {"interaction_need": "information_exchange", "affect": "neutral", "affect_confidence": 0.8, "topic_continuity": "continue", "response_pressure": "high"},
         "relevant_user_domain": [],
         "alignment": {"orientation": "self_led", "lambda_trace": 0.2, "basis": "Answer the current question in the target's normal style.", "affected_dimensions": ["content_focus"]},
-        "behavior_policy": {"primary_action": "answer", "selected_question_slots": ["q1"], "outbound_question_mode": "none", "outbound_question_focus": "", "reflection_mode": "none", "self_disclosure_mode": "brief", "grounding_mode": "none", "empathy_mode": "none", "intimacy_mode": "match", "message_shape": "single_typical", "required_content_slots": ["answer q1"], "forbidden_additions": ["unsolicited_exploration"]},
+        "behavior_policy": {"primary_action": "answer", "selected_question_slots": ["q1"], "outbound_question_mode": "none", "outbound_question_focus": "", "reflection_mode": "none", "self_disclosure_mode": "brief", "grounding_mode": "none", "empathy_mode": "none", "intimacy_mode": "match", "message_length": "typical", "required_content_slots": ["answer q1"], "forbidden_additions": ["unsolicited_exploration"]},
         "evidence_ids": [],
     }
 
 
-def test_decision_contract_rejects_multi_content_without_two_slots():
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_decision_composition_is_derived_from_variable_slots(count):
     value = valid_decision()
-    value["behavior_policy"]["message_shape"] = "multi_content"
-    with pytest.raises(ValueError, match="multi_content"):
-        _normalize_decision(value, set(), {"question_slots": [{"slot_id": "q1"}]})
+    value["behavior_policy"]["required_content_slots"] = [f"content {i}" for i in range(count)]
+    normalized = _normalize_decision(value, set(), {"question_slots": [{"slot_id": "q1"}]})
+    expected = "single_typical" if count == 1 else "multi_content"
+    assert normalized["behavior_policy"]["message_shape"] == expected
 
 
 def test_decision_contract_rejects_moderate_empathy_without_affect():
@@ -212,10 +214,10 @@ def test_actor_allows_ordinary_plan_phrase_when_reflection_is_none():
     assert _normalize_actor(message, "Emi", decision) == message
 
 
-def test_actor_rejects_explicit_reflection_when_reflection_is_none():
+def test_actor_does_not_mislabel_lexical_reflection_as_schema_failure():
     decision = valid_decision()
-    with pytest.raises(ValueError, match="unsupported reflection"):
-        _normalize_actor("I think about why I keep avoiding difficult conversations because I feel uncertain.", "Emi", decision)
+    text = "I think about why I keep avoiding difficult conversations because I feel uncertain."
+    assert _normalize_actor(text, "Emi", decision) == text
 
 
 def test_user_domain_merges_only_exact_duplicate_facts():

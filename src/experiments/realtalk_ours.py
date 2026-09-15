@@ -796,24 +796,16 @@ def _run_preflight(
 
 
 def _parse_structured_json(content: str) -> Any:
-    """Parse a JSON object even when the provider wraps it in markdown or commentary."""
+    """Parse the outer value only; never salvage nested data from truncated JSON."""
     text = str(content or "").strip()
     if not text:
         raise ValueError("empty structured response")
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(text):
-        if character not in "[{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(text[index:])
-            # Some compatible endpoints wrap one schema object in a singleton
-            # array. This is a mechanical shape repair; multiple values remain invalid.
-            if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
-                return value[0]
-            return value
-        except json.JSONDecodeError:
-            continue
-    raise json.JSONDecodeError("no complete JSON value found", text, 0)
+    if text.startswith("```"):
+        match = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.I | re.S)
+        if not match:
+            raise ValueError("incomplete JSON code fence")
+        text = match.group(1).strip()
+    return json.loads(text)
 
 
 def _structured_call(
@@ -831,6 +823,7 @@ def _structured_call(
     enable_thinking: bool,
     hard_timeout_seconds: int = 0,
     repair_raw_chars: int = 12000,
+    validate_schema: bool = False,
 ) -> dict[str, Any]:
     repair = {"raw": "", "error": ""}
     logical_attempt = {"value": 0}
@@ -877,7 +870,12 @@ def _structured_call(
             "recorded_at_utc": _now(),
         })
         try:
+            if result.finish_reason == "length":
+                raise ValueError("structured response truncated at output token limit; return the complete object")
             parsed = _parse_structured_json(result.content)
+            if validate_schema:
+                from jsonschema import Draft202012Validator
+                Draft202012Validator(schema["schema"]).validate(parsed)
             data = normalizer(parsed)
         except Exception as exc:
             repair["raw"] = result.content
