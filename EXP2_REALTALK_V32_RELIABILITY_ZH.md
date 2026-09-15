@@ -37,3 +37,11 @@
 ## 验证
 
 已运行针对解析截断、完整代码块、单元素数组拒绝、schema额外字段、可变数组、确定性组合推导、合同修复、缓存复用、重试上限和现有Judge的测试。最终执行状态写入新运行目录 stage6_status.json / stage60_status.json；失败保留原始响应。
+
+## V3.2.1 实际故障复查
+
+- 新预检已成功完成两次画像更新，第二次更新未再截断。
+- turn_29 的三次原文均为 `Right? Always a good feeling ...`，模型确实收到不同修复输入（prompt token 数和 response ID 不同）。这是附和语的问号被一刀切拒绝，不是 JSON 或 API 问题。
+- 只对 acknowledge 动作下的句首 Right?/I know right?/IKR? 且后接不含问号的陈述做表层例外；不修改输出原文，不接受孤立 Right? 或任何后续问句。例外写入 actor audit，Judge 照常评估原文。它不是语义正确性的保证。
+- 确认 canonical V9 同窗口60条为 Reflectiveness=0.65、Grounding=0.5166667、Empathy AD=1.3166667。历史引用的0.667/0.567/1.333来自V14目录，不能再标为V9。
+- 本地回归测试67通过，1跳过。当前协议为 realtalk_task1_ours_behavior_calibrated_v3_2_1_contract_reliability。

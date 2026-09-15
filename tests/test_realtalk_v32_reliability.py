@@ -5,7 +5,7 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
 from src.experiments.realtalk_ours import _parse_structured_json, _structured_call
-from src.experiments.realtalk_behavior_calibrated_v3 import DECISION_SCHEMA, _actor_call
+from src.experiments.realtalk_behavior_calibrated_v3 import DECISION_SCHEMA, _actor_call, _normalize_actor, _question_surface_audit
 from src.experiments.operation_checkpoint import OperationCheckpoint
 from src.experiments.personaemp.client import ChatResult
 
@@ -79,3 +79,13 @@ def test_schema_uses_variable_slots_not_redundant_composition():
     for n in (0, 5):
         with pytest.raises(ValidationError):
             Draft202012Validator(slots).validate(["content"] * n)
+
+
+def test_agreement_tag_retains_raw_text_but_does_not_admit_followup_questions():
+    policy = {"primary_action": "acknowledge", "outbound_question_mode": "none"}
+    text = "Right? Always a good feeling to leave work early."
+    assert _normalize_actor(text, "Target", {"behavior_policy": policy}) == text
+    assert _question_surface_audit(text, policy)["agreement_prefix_exception"]
+    for bad in ("Right?", "Right? Where are you going?", "Is that right?", "Really? That's nice."):
+        with pytest.raises(ValueError, match="unselected outbound question"):
+            _normalize_actor(bad, "Target", {"behavior_policy": policy})

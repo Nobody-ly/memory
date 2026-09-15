@@ -30,7 +30,7 @@ from .realtalk_ours import _backend_from_env, _structured_call as _base_structur
 from .realtalk_ours import _call_with_hard_timeout
 
 
-PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_2_contract_reliability"
+PROTOCOL = "realtalk_task1_ours_behavior_calibrated_v3_2_1_contract_reliability"
 MODEL = "deepseek-v4-flash"
 _structured_call = partial(_base_structured_call, validate_schema=True, repair_raw_chars=1000000)
 DECODING = {"self": 4096, "user": 8192, "decision": 2048, "actor": 300,
@@ -503,6 +503,17 @@ def _prompt_hashes() -> dict[str, str]:
     return {name: _hash(value) for name, value in prompts.items()}
 
 
+def _question_surface_audit(message: str, policy: dict[str, Any]) -> dict[str, Any]:
+    marks = message.count("?") + message.count("？")
+    # A leading agreement tag followed by a statement can be acknowledgment,
+    # not information-seeking. Keep the literal text for the unmodified judge.
+    match = re.match(r"^\s*(?:right|i know,? right|ikr)\s*[?？]\s*(\S.*)$", message, re.I | re.S)
+    agreement_tag = bool(policy.get("primary_action") == "acknowledge" and match
+                         and "?" not in match.group(1) and "？" not in match.group(1))
+    return {"question_marks": marks, "agreement_prefix_exception": agreement_tag,
+            "unhandled_question_marks": marks - int(agreement_tag)}
+
+
 def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     message = text.strip()
     if not message:
@@ -512,7 +523,8 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     if message.startswith(("{", "[")) or re.search(r'"(?:behavior_policy|user_state|self_domain|lambda_trace)"\s*:', message, re.I):
         raise ValueError("actor leaked private structure")
     policy = decision["behavior_policy"]
-    question_count = message.count("?") + message.count("？")
+    surface = _question_surface_audit(message, policy)
+    question_count = surface["unhandled_question_marks"]
     outbound_question_allowed = policy["outbound_question_mode"] != "none"
     if not outbound_question_allowed and question_count:
         raise ValueError("actor added an unselected outbound question")
@@ -565,7 +577,7 @@ def _actor_call(checkpoint: OperationCheckpoint, backend: Any, key: str, speaker
             feedback["error"] = str(exc)
             feedback["draft"] = result.content.strip()
             raise
-        return {"data": message, "audit": {"model": result.model, "logical_attempts": attempts["n"], "thinking_enabled": False, "response_id": result.response_id, "finish_reason": result.finish_reason}}
+        return {"data": message, "audit": {"model": result.model, "logical_attempts": attempts["n"], "thinking_enabled": False, "response_id": result.response_id, "finish_reason": result.finish_reason, "question_surface": _question_surface_audit(message, decision["behavior_policy"])}}
     return checkpoint.execute(key, operation, validate, max_attempts)
 
 
