@@ -795,6 +795,23 @@ def _run_preflight(
     return value
 
 
+def _parse_structured_json(content: str) -> Any:
+    """Parse a JSON object even when the provider wraps it in markdown or commentary."""
+    text = str(content or "").strip()
+    if not text:
+        raise ValueError("empty structured response")
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(text):
+        if character not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+            return value
+        except json.JSONDecodeError:
+            continue
+    raise json.JSONDecodeError("no complete JSON value found", text, 0)
+
+
 def _structured_call(
     *,
     checkpoint: OperationCheckpoint,
@@ -856,7 +873,7 @@ def _structured_call(
             "recorded_at_utc": _now(),
         })
         try:
-            parsed = json.loads(result.content)
+            parsed = _parse_structured_json(result.content)
             data = normalizer(parsed)
         except Exception as exc:
             repair["raw"] = result.content
