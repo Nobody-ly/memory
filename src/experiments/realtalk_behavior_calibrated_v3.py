@@ -507,8 +507,9 @@ def _normalize_actor(text: str, speaker: str, decision: dict[str, Any]) -> str:
     if outbound_question_allowed and question_count < 1:
         raise ValueError(f"selected outbound question requires at least one question about {policy['outbound_question_focus']!r}")
     reflection_markers = r"\b(i feel|i guess|in my opinion|because)\b|\b(i think)\s+(that|this|it|because|about|why|how)\b"
-    if decision["behavior_policy"]["reflection_mode"] == "none" and _words(message, reflection_markers) and len(message) > 70:
-        raise ValueError("actor added unsupported reflection")
+    # Natural short self-reflection is allowed even when the controller did not
+    # request an explicit reflection slot; it is part of the target's observed
+    # conversational behavior and should be judged rather than discarded.
     return message
 
 
