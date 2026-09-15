@@ -806,6 +806,10 @@ def _parse_structured_json(content: str) -> Any:
             continue
         try:
             value, _ = decoder.raw_decode(text[index:])
+            # Some compatible endpoints wrap one schema object in a singleton
+            # array. This is a mechanical shape repair; multiple values remain invalid.
+            if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+                return value[0]
             return value
         except json.JSONDecodeError:
             continue
