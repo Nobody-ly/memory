@@ -224,6 +224,7 @@ class Config:
     resume: bool = False
     parent_output: str | None = None
     preflight_only: bool = False
+    selected_ids_file: str | None = None
 
 
 def _json(value: Any) -> str:
@@ -591,8 +592,8 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int, parent_output: Path | None = None) -> dict[str, Any]:
-    manifest = {"protocol": PROTOCOL, "mode": "cb", "gate": gate, "model": MODEL, "thinking_enabled_all_stages": False, "dataset": dataset_manifest, "selected_ids_sha256": _hash(selected_ids), "prompt_hashes": _prompt_hashes(), "schema_hashes": {"self": _hash(SELF_DOMAIN_SCHEMA), "user": _hash(USER_DOMAIN_SCHEMA), "decision": _hash(DECISION_SCHEMA)}, "history_compression_enabled": False, "history_truncation_enabled": False, "generated_outputs_rolled_into_history": False, "omega_enabled": False, "future_user_state_enabled": False, "semantic_verification_or_candidate_search": False, "v2_outputs_read": False, "judge_labels_read": False, "ground_truth_read_by_generation": False}
+def _manifest(dataset_manifest: dict[str, Any], selected_ids: list[str], gate: int, parent_output: Path | None = None, selected_ids_file: str | None = None) -> dict[str, Any]:
+    manifest = {"protocol": PROTOCOL, "mode": "cb", "gate": gate, "model": MODEL, "thinking_enabled_all_stages": False, "dataset": dataset_manifest, "selected_ids_sha256": _hash(selected_ids), "selected_ids_source": selected_ids_file, "prompt_hashes": _prompt_hashes(), "schema_hashes": {"self": _hash(SELF_DOMAIN_SCHEMA), "user": _hash(USER_DOMAIN_SCHEMA), "decision": _hash(DECISION_SCHEMA)}, "history_compression_enabled": False, "history_truncation_enabled": False, "generated_outputs_rolled_into_history": False, "omega_enabled": False, "future_user_state_enabled": False, "semantic_verification_or_candidate_search": False, "v2_outputs_read": False, "judge_labels_read": False, "ground_truth_read_by_generation": False}
     if parent_output is not None:
         manifest["parent_output"] = str(parent_output)
         manifest["parent_manifest_sha256"] = _file_sha256(parent_output / "manifest.json")
@@ -670,6 +671,15 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
     if str(config.gate) not in gates:
         raise ValueError(f"V3 gate must be one of {sorted(gates)}")
     selected_ids = list(gates[str(config.gate)])
+    if config.selected_ids_file:
+        requested = json.loads(Path(config.selected_ids_file).read_text(encoding="utf-8"))
+        if not isinstance(requested, list) or not requested or len(requested) != len(set(requested)):
+            raise ValueError("selected_ids_file must contain a non-empty list of unique result_id strings")
+        available = {point["result_id"] for item in prepared for point in item["points"]}
+        missing = [rid for rid in requested if rid not in available]
+        if missing:
+            raise ValueError(f"selected ids are not present in the canonical dataset: {missing[:3]}")
+        selected_ids = list(requested)
     index = {point["result_id"]: (item, point) for item in prepared for point in item["points"]}
     selected_speakers = {index[rid][0]["speaker"] for rid in selected_ids}
     output = Path(config.output_dir).resolve(); output.mkdir(parents=True, exist_ok=True)
@@ -680,7 +690,7 @@ def run(config: Config, backend: Any | None = None) -> dict[str, Any]:
     backend = backend or _backend_from_env(MODEL)
     if backend.model != MODEL:
         raise ValueError(f"backend model mismatch: {backend.model}")
-    manifest = _manifest(dataset_manifest, selected_ids, config.gate, parent_output)
+    manifest = _manifest(dataset_manifest, selected_ids, config.gate, parent_output, config.selected_ids_file)
     signature = _hash({"manifest": manifest, "config": {k:v for k,v in asdict(config).items() if k not in {"output_dir", "fresh", "resume", "gate"}}})
     checkpoint = OperationCheckpoint(output/"checkpoint.json", signature)
     if config.preflight_only:
@@ -744,8 +754,9 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--parent-output")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--selected-ids-file")
     args = parser.parse_args()
-    result = run(Config(dataset_dir=args.dataset_dir, output_dir=args.output_dir, gate=args.gate, model=args.model, fresh=args.fresh, resume=args.resume, parent_output=args.parent_output, preflight_only=args.preflight_only))
+    result = run(Config(dataset_dir=args.dataset_dir, output_dir=args.output_dir, gate=args.gate, model=args.model, fresh=args.fresh, resume=args.resume, parent_output=args.parent_output, preflight_only=args.preflight_only, selected_ids_file=args.selected_ids_file))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
