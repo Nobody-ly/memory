@@ -47,14 +47,14 @@ def summarize(rows, field):
     return per, macro
 
 
-def paired_report(output):
-    details, summary = {s: {} for s in SPEAKERS}, {}
+def paired_report(output, *, speakers=SPEAKERS, count=60, scope=SCOPE):
+    details, summary = {s: {} for s in speakers}, {}
     for field, old_file, new_file in (
         ("metrics", "v9_scored.jsonl", "judge/scored.jsonl"),
         ("local_metrics", "v9_local/results_with_local_metrics.jsonl", "candidate_local/results_with_local_metrics.jsonl"),
     ):
         old, new = read_rows(output / old_file), read_rows(output / new_file)
-        if {r["result_id"] for r in old} != {r["result_id"] for r in new} or len(old) != 60 or len(new) != 60:
+        if {r["result_id"] for r in old} != {r["result_id"] for r in new} or len(old) != count or len(new) != count:
             raise ValueError("paired scoring IDs/count mismatch")
         # Judge rows retain speaker identity in the standard evaluation output.
         old_per, old_macro = summarize(old, field)
@@ -62,14 +62,14 @@ def paired_report(output):
         for key in old_macro:
             summary[key] = {"v9": old_macro[key], "candidate": new_macro[key],
                             "delta": new_macro[key] - old_macro[key]}
-            for speaker in SPEAKERS:
+            for speaker in speakers:
                 details[speaker][key] = {"v9": old_per[speaker][key], "candidate": new_per[speaker][key],
                                         "delta": new_per[speaker][key] - old_per[speaker][key]}
-    write(output / "speaker_macro_comparison.json", {"scope": SCOPE, "macro": summary, "per_speaker": details})
-    lines = ["# V3.2.1 Other-Person Sequential Windows", "", SCOPE,
-             "", "Emi, Nicolas, Kevin: first 20 target messages each. Full causal history; frozen generation code.",
+    write(output / "speaker_macro_comparison.json", {"scope": scope, "macro": summary, "per_speaker": details})
+    lines = ["# V3.2.1 Sequential Windows", "", scope,
+             "", f"{', '.join(speakers)}: first 20 target messages each. Full causal history; frozen generation code.",
              "Speaker macro mean; AD lower is better. Historical V9 prediction labels, shared reference labels."]
-    for title, values in [("Macro (60)", summary), *details.items()]:
+    for title, values in [(f"Macro ({count})", summary), *details.items()]:
         lines += ["", f"## {title}", "", "| Metric | V9 | V3.2.1 | Delta |", "|---|---:|---:|---:|"]
         lines += [f"| {k} | {v['v9']:.6f} | {v['candidate']:.6f} | {v['delta']:+.6f} |" for k, v in values.items()]
     (output / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
